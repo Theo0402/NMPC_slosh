@@ -1,0 +1,8 @@
+# The primary cup (README, "Cup"; research plan §0). SI units.
+id: r40
+material: clear acrylic
+inner_radius_m: 0.040
+inner_height_m: 0.100
+wall_thickness_m: null     # [MISSING]: measure with calipers (research plan §9, week 1)
+outer_diameter_m: null     # [MISSING]: 0.080 + 2 * wall thickness
+yoke: null                 # Rev F yoke for the outer diameter; printed once t_w is known

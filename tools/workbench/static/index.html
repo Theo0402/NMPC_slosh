@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slosh workbench</title>
+<style>
+:root { --bg:#f7f7f5; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6b66; --line:#dcdcd6; --ok:#1f7a3a; --bad:#b3261e;
+        --stale:#a86400; --none:#8a8a84; --accent:#2457a6; --stop:#c62828; --code:#f0f0ec; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161615; --panel:#1f1f1d; --ink:#ececea; --muted:#a2a29c; --line:#3a3a36;
+        --ok:#5cc27a; --bad:#ff6b5e; --stale:#e3a33a; --none:#8f8f88; --accent:#7aa7ff; --stop:#e53935; --code:#2a2a27; } }
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+header { position:sticky; top:0; z-index:10; display:flex; gap:16px; align-items:center; padding:8px 16px;
+         background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+header h1 { font-size:16px; margin:0; }
+header .info { color:var(--muted); font-size:12px; }
+#stop { margin-left:auto; background:var(--stop); color:#fff; border:0; font-weight:700; font-size:16px;
+        padding:10px 22px; border-radius:6px; cursor:pointer; }
+#stop:disabled { opacity:.45; cursor:default; }
+.warn { color:var(--stale); font-weight:600; }
+main { display:grid; grid-template-columns:minmax(260px, 340px) 1fr; min-height:calc(100vh - 56px); }
+@media (max-width: 820px) { main { grid-template-columns:1fr; } }
+nav { border-right:1px solid var(--line); overflow:auto; max-height:calc(100vh - 56px); padding:8px; }
+nav h3 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:12px 6px 4px; }
+.srow { display:flex; gap:6px; align-items:center; padding:5px 6px; border-radius:5px; cursor:pointer; }
+.srow:hover, .srow.sel { background:var(--code); }
+.srow .num { width:30px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.srow .t { flex:1; }
+.badge { font-size:11px; padding:1px 6px; border-radius:9px; border:1px solid currentColor; white-space:nowrap; }
+.passed { color:var(--ok); } .failed { color:var(--bad); } .stale { color:var(--stale); } .notrun { color:var(--none); }
+.tag { font-size:11px; color:var(--muted); }
+section#view { padding:16px 20px; overflow:auto; max-height:calc(100vh - 56px); }
+.tabs { display:flex; gap:4px; margin-bottom:12px; }
+.tabs button { background:none; border:1px solid var(--line); color:var(--ink); padding:6px 12px; border-radius:5px; cursor:pointer; }
+.tabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:12px; }
+.card h2 { margin:0 0 6px; font-size:17px; } .card h4 { margin:8px 0 4px; }
+.muted { color:var(--muted); }
+table { border-collapse:collapse; width:100%; } td, th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-size:12px; color:var(--muted); font-weight:600; }
+input[type=text], input[type=number], textarea, select { background:var(--panel); color:var(--ink); border:1px solid var(--line);
+        border-radius:4px; padding:4px 6px; font:inherit; }
+textarea { width:100%; }
+button.act { background:var(--accent); color:#fff; border:0; padding:6px 14px; border-radius:5px; cursor:pointer; }
+button.act:disabled { opacity:.45; cursor:default; }
+button.ghost { background:none; border:1px solid var(--line); color:var(--ink); padding:4px 10px; border-radius:5px; cursor:pointer; }
+.modes button { margin-right:4px; }
+.modes button.on { outline:2px solid var(--accent); }
+pre.console { background:var(--code); padding:8px; border-radius:6px; max-height:260px; overflow:auto; font-size:12px; white-space:pre-wrap; }
+.q { border:2px solid var(--accent); padding:8px; border-radius:6px; margin:6px 0; }
+.err { color:var(--bad); font-weight:600; }
+svg.plot { width:100%; height:220px; background:var(--code); border-radius:6px; }
+.legend span { margin-right:12px; font-size:12px; }
+.diff td.old { color:var(--bad); } .diff td.new { color:var(--ok); }
+.armgrid { display:grid; grid-template-columns:minmax(300px, 1.1fr) minmax(300px, 1fr); gap:12px; }
+@media (max-width: 1100px) { .armgrid { grid-template-columns:1fr; } }
+.views { display:flex; gap:10px; flex-wrap:wrap; } .views figure { margin:0; flex:1; min-width:240px; }
+.views figcaption { font-size:12px; color:var(--muted); margin-bottom:2px; }
+svg.view { width:100%; aspect-ratio:1; background:var(--code); border-radius:6px; }
+.pad { display:grid; grid-template-columns:repeat(3, 64px); grid-template-rows:repeat(3, 52px); gap:6px; }
+.zpad { display:grid; grid-template-rows:repeat(2, 52px); gap:6px; margin-left:22px; }
+.pad button, .zpad button { font-size:15px; font-weight:600; border-radius:8px; border:1px solid var(--line);
+        background:var(--panel); color:var(--ink); cursor:pointer; }
+.pad button:hover:not(:disabled), .zpad button:hover:not(:disabled) { border-color:var(--accent); }
+.pad button:disabled, .zpad button:disabled, .act:disabled, .ghost:disabled { opacity:.4; cursor:default; }
+.steps button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+.big { font-size:15px; padding:8px 16px; }
+.pos { font-variant-numeric:tabular-nums; font-family:ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Slosh workbench</h1>
+  <span class="info" id="hostinfo"></span>
+  <span class="info" id="sessinfo"></span>
+  <span id="confwarn" class="warn"></span>
+  <button id="stop" title="Software stop: the running tool decelerates and disables. Not a replacement for the e-stop." disabled>STOP</button>
+</header>
+<main>
+  <nav id="nav"></nav>
+  <section id="view">
+    <div class="tabs">
+      <button data-tab="arm" class="on">Arm control</button>
+      <button data-tab="stage">Stages</button>
+      <button data-tab="past">Past runs</button>
+      <button data-tab="backup">Backup</button>
+      <button data-tab="coeffs">Coefficients</button>
+      <button data-tab="limits">Speed limits</button>
+      <button data-tab="audit">Audit</button>
+    </div>
+    <div id="pane"></div>
+  </section>
+</main>
+<script>
+"use strict";
+const S = { ov:null, sel:null, tab:"arm", showPlanned:false, step:10, points:[], pathName:"path1", mode:null, runSince:0, console:[], joint:5, pending:{}, lastRunId:null };
+const $ = (s, el=document) => el.querySelector(s);
+// every character that can end an HTML attribute, apostrophe included (review W6: text values were cut at one)
+const esc = t => String(t ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(path, body) {
+  // the workbench refuses API requests without this header: another site's page cannot send it (review S15)
+  const opt = body === undefined ? {headers:{"X-Slosh-Workbench":"1"}}
+    : {method:"POST", headers:{"Content-Type":"application/json", "X-Slosh-Workbench":"1"}, body:JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({error:"bad reply"}));
+  if (!r.ok) throw new Error(j.refused || j.error || r.statusText);
+  return j;
+}
+function cls(st) { return {"passed":"passed","failed":"failed","stale":"stale"}[st] || "notrun"; }
+function badge(mode, st) { return `<span class="badge ${cls(st)}" title="${esc(mode)}: ${esc(st)}">${esc(mode)} ${st === "passed" ? "✓" : st === "failed" ? "✗" : st === "stale" ? "↻" : "·"}</span>`; }
+
+async function refresh() {
+  try { S.ov = await api("/api/overview"); } catch (e) { $("#hostinfo").textContent = "workbench not reachable: " + e.message; return; }
+  const ov = S.ov;
+  $("#hostinfo").textContent = ov.host_problem ? `arm mode not available here (${ov.host_problem})` : "arm mode allowed on this machine";
+  $("#sessinfo").textContent = `session ${ov.session} · coefficients v${ov.coeff_version}`;
+  $("#confwarn").textContent = ov.confirmed_uncommitted ? "confirmed.yaml changed and not committed" : "";
+  $("#stop").disabled = !(ov.run && ov.run.running);
+  const groups = {};
+  ov.stages.forEach(s => (groups[s.group] = groups[s.group] || []).push(s));
+  const shown = s => S.showPlanned || s.status === "built";
+  $("#nav").innerHTML = `<label class="muted" style="display:block;margin:4px 6px"><input type="checkbox" id="showpl" ${S.showPlanned ? "checked" : ""}>
+     show stages not built yet</label>` + Object.keys(ov.groups).map(g => (groups[g] || []).filter(shown).length ? `<h3>${esc(ov.groups[g])}</h3>` + (groups[g] || []).filter(shown).map(s =>
+    `<div class="srow ${S.sel === s.id ? "sel" : ""}" data-id="${s.id}"><span class="num">${esc(s.num)}</span>
+     <span class="t">${esc(s.title)} ${s.status !== "built" ? `<span class="tag">(${esc(s.status)})</span>` : ""} ${s.locked ? "🔒" : ""}</span>
+     ${s.modes.map(m => badge(m === "dry-run" ? "dry" : m, s.per_mode[m])).join(" ")}</div>`).join("") : "").join("");
+  $("#showpl").onchange = e => { S.showPlanned = e.target.checked; refresh(); };
+  document.querySelectorAll(".srow").forEach(el => el.onclick = () => { S.sel = el.dataset.id; S.tab = "stage"; setTab(); refresh(); });
+  if (S.run && !(ov.run && ov.run.running) && S.wasRunning) { S.wasRunning = false; if (S.tab === "stage") renderStage(); }
+  S.wasRunning = !!(ov.run && ov.run.running);
+  if (!S.sel && ov.stages.length) S.sel = ov.stages[0].id;
+  // the stage pane is redrawn on a click, a mode change or the end of a run, never on the timer,
+  // so that a half-typed note or option is not lost
+}
+
+function setTab() {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === S.tab));
+  if (S.tab === "arm") renderArm(); else if (S.tab === "stage") renderStage(); else if (S.tab === "coeffs") renderCoeffs();
+  else if (S.tab === "past") renderPast(); else if (S.tab === "backup") renderBackup();
+  else if (S.tab === "limits") renderLimits(); else renderAudit();
+}
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { S.tab = b.dataset.tab; setTab(); });
+
+async function renderStage() {
+  if (!S.sel) return;
+  let v;
+  try { v = await api("/api/stage/" + S.sel); } catch (e) { $("#pane").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const s = v.stage;
+  if (!S.mode || !s.modes.includes(S.mode) || S.modeStage !== s.id) { S.mode = s.modes[0]; S.modeStage = s.id; }
+  const locks = v.locks[S.mode] || [];
+  const isForm = S.mode === "form";
+  const canRun = s.status === "built" && !isForm;
+  const running = S.ov && S.ov.run && S.ov.run.running;
+  let h = `<div class="card"><h2>${esc(s.num)} ${esc(s.title)}</h2>
+    <div class="muted">${esc(s.purpose)}</div>
+    <p><b>Plan:</b> ${esc(s.plan)}<br><b>Tool:</b> <code>${esc(s.tool)}</code> <span class="tag">${esc(s.status)}</span><br>
+    <b>Output:</b> ${esc(s.output)}<br><b>Requires:</b> ${s.requires.map(esc).join(", ") || "nothing"}
+    ${v.downstream.length ? `<br><b>Required by${s.gate ? " (a gate: it locks these, it does not make them stale)" : ""}:</b> ${v.downstream.map(esc).join(", ")}` : ""}</p>
+    ${s.inputs.length ? `<b>Inputs</b><ul>${s.inputs.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : ""}
+    <h4>Status</h4>${s.modes.map(m => `${badge(m, v.per_mode[m].status)} <span class="muted">${esc(v.per_mode[m].result_id || v.per_mode[m].run_id || "")}</span>`).join("<br>")}
+  </div>`;
+  h += `<div class="card"><h4>Run</h4><div class="modes">${s.modes.map(m => `<button class="ghost ${m === S.mode ? "on" : ""}" data-mode="${m}"
+        ${m === "arm" && S.ov.host_problem ? "disabled title='arm runs only on the Linux machine'" : ""}>${esc(m)}</button>`).join("")}</div>`;
+  if (locks.length) h += `<p class="warn">Locked: ${locks.map(l => esc(l.reason)).join("; ")}</p>` +
+     (locks.every(l => l.overridable) ? `<label>Override reason (logged): <input id="ovr" type="text" size="50"></label>` : "");
+  if (isForm) {
+    h += `<table>${Object.entries(s.fields).map(([id, f]) => `<tr><td>${esc(f.label)}</td><td>${f.type === "check"
+          ? `<input type="checkbox" data-f="${id}">` : `<input type="${f.type === "number" ? "number" : "text"}" step="any" data-f="${id}">`}</td></tr>`).join("")}</table>`;
+    h += opCriteria(s, "op") + `<p><label>Note (required): <input id="fnote" type="text" size="60"></label>
+         <button class="act" id="submitform">Submit and accept</button></p><div id="formres"></div>`;
+  } else if (canRun) {
+    h += Object.entries(s.options).map(([k, o]) => `<p><label>${esc(o.label)}: <input type="text" data-opt="${k}" size="40"></label></p>`).join("");
+    h += `<p><label>Note for the trial header: <input id="rnote" type="text" size="50"></label>
+          ${S.mode === "dry-run" || S.mode === "mock" ? `<label><input type="checkbox" id="ayes"> answer prompts yes (${esc(S.mode)} only)</label>` : ""}</p>
+          <button class="act" id="runbtn" ${running ? "disabled" : ""}>Run ${esc(s.num)} (${esc(S.mode)})</button>`;
+  } else {
+    h += `<p class="muted">The tool for this stage is ${esc(s.status)}: ${esc(s.tool)}.</p>`;
+  }
+  h += `</div><div id="runpane"></div>`;
+  h += `<div class="card"><h4>Pass criteria</h4><table>${Object.entries(s.criteria).map(([id, c]) =>
+        `<tr><td>${esc(id)}</td><td>${esc(c.text)}</td><td class="muted">${esc(c.kind)}${c.coeff ? " · " + esc(c.coeff) : ""}</td></tr>`).join("")}</table></div>`;
+  if (v.coeffs.length) h += `<div class="card"><h4>Coefficients this stage adjusts</h4>${coeffTable(v.coeffs, false)}
+       <p class="muted">Edit them on the Coefficients tab; every edit is a new version with a note.</p></div>`;
+  h += `<div class="card"><h4>Recent runs</h4><table><tr><th>run (UTC)</th><th>mode</th><th>trial (UTC)</th><th>criteria</th><th></th></tr>
+       ${v.runs.slice().reverse().map(r => `<tr><td>${esc(r.run_id)}</td><td>${esc(r.mode)}${r.practice ? " <span class='tag'>practice</span>" : ""}</td><td>${esc(r.trial_id || "")}</td>
+       <td class="${r.auto_ok ? "passed" : "failed"}">${r.auto_ok ? "met" : (r.stopped ? "stopped" : "not met")}</td>
+       <td>${r.practice ? "<span class='muted'>practice: never counts</span>" : (r.auto_ok && r.mode !== "form" ? `<button class="ghost" data-show="${esc(r.run_id)}">review / accept</button>` : "")}</td></tr>`).join("")}</table>
+       <h4>Accepted results</h4><ul>${v.results.slice().reverse().map(r => `<li>${esc(r.result_id)} · ${esc(r.mode)} · ${esc(r.accepted_utc)} · ${esc(r.note)}</li>`).join("") || "<li class='muted'>none</li>"}</ul></div>`;
+  $("#pane").innerHTML = h;
+  document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { S.mode = b.dataset.mode; renderStage(); });
+  if ($("#runbtn")) $("#runbtn").onclick = () => startRun(s);
+  if ($("#submitform")) $("#submitform").onclick = () => submitForm(s);
+  document.querySelectorAll("[data-show]").forEach(b => b.onclick = () => showResult(s, v.runs.find(r => r.run_id === b.dataset.show)));
+  if (S.ov.run && S.ov.run.stage === s.id) renderRun();
+}
+
+function opCriteria(s, prefix) {
+  const ops = Object.entries(s.criteria).filter(([, c]) => c.kind === "operator");
+  return ops.length ? `<h4>Owner checks</h4>` + ops.map(([id, c]) => `<label style="display:block"><input type="checkbox" data-${prefix}="${id}"> ${esc(c.text)}</label>`).join("") : "";
+}
+
+async function startRun(s) {
+  const options = {};
+  document.querySelectorAll("[data-opt]").forEach(i => options[i.dataset.opt] = i.value);
+  const body = {stage:s.id, mode:S.mode, note:$("#rnote")?.value || "", assume_yes:!!$("#ayes")?.checked, options,
+                override_reason:$("#ovr")?.value || null};
+  if (S.mode === "arm" && !confirm(`Run ${s.num} ${s.title} ON THE ARM? The e-stop must be within reach.`)) return;
+  try { await api("/api/run", body); S.runSince = 0; S.console = []; await refresh(); pollRun(); }
+  catch (e) { alert("Refused: " + e.message); }
+}
+
+async function submitForm(s) {
+  const values = {}, checks = {};
+  document.querySelectorAll("[data-f]").forEach(i => values[i.dataset.f] = i.type === "checkbox" ? i.checked : i.value);
+  document.querySelectorAll("[data-op]").forEach(i => checks[i.dataset.op] = i.checked);
+  try {
+    const r = await api("/api/form", {stage:s.id, values, note:$("#fnote").value, operator_checks:checks,
+                                       override_reason:$("#ovr")?.value || null});
+    $("#formres").innerHTML = critTable(r.run.criteria) + (r.result ? `<p class="passed">Accepted: ${esc(r.result.result_id)}</p>` : `<p class="failed">Not passed; saved as a run.</p>`);
+    refresh();
+  } catch (e) { $("#formres").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+function critTable(crit) {
+  return `<table>${(crit || []).map(c => `<tr><td class="${c.ok ? "passed" : "failed"}">${c.ok ? "✓" : "✗"}</td><td>${esc(c.text)}</td><td class="muted">${esc(c.detail)}</td></tr>`).join("")}</table>`;
+}
+
+function showResult(s, r) {
+  const ops = Object.entries(s.criteria).filter(([, c]) => c.kind === "operator");
+  $("#runpane").innerHTML = `<div class="card"><h4>Result of ${esc(r.run_id)} (${esc(r.mode)})</h4>${critTable(r.criteria)}
+    <details><summary>metrics</summary><pre class="console">${esc(JSON.stringify(r.metrics, null, 1))}</pre></details>
+    ${opCriteria(s, "acc")}
+    <p><label>Note (required): <input id="anote" type="text" size="60"></label> <button class="act" id="accbtn">Accept</button></p><div id="accres"></div></div>`;
+  $("#accbtn").onclick = async () => {
+    const checks = {};
+    document.querySelectorAll("[data-acc]").forEach(i => checks[i.dataset.acc] = i.checked);
+    try { const res = await api("/api/accept", {run_id:r.run_id, note:$("#anote").value, operator_checks:checks});
+          $("#accres").innerHTML = `<p class="passed">Accepted: ${esc(res.result_id)}</p>`; refresh(); }
+    catch (e) { $("#accres").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  };
+}
+
+const runId = () => S.runView ? S.runView.run_id : null;     // sent with answers, commands and stop (review S16)
+
+async function pollRun() {
+  let r;
+  try { r = await api("/api/run?since=" + S.runSince); }
+  catch (e) {                                   // keep trying: a page that stops polling shows a run that has moved on
+    S.lost = (S.lost || 0) + 1;
+    $("#hostinfo").textContent = `Connection to the workbench lost (${e.message}); retrying…`;
+    $("#hostinfo").classList.add("failed");
+    setTimeout(pollRun, Math.min(5000, 300 * 2 ** Math.min(S.lost, 4)));
+    return;
+  }
+  if (S.lost) { S.lost = 0; $("#hostinfo").classList.remove("failed"); refresh(); }
+  if (!r) { if (S.runView) { S.runView = null; refresh(); } return; }     // e.g. the workbench was restarted
+  if (S.runView && r.run_id !== S.runView.run_id && S.runSince) {   // another run since: read its console from the start
+    S.runSince = 0; S.console = []; S.runView = null; setTimeout(pollRun, 0); return;
+  }
+  S.console.push(...r.console); S.runSince = r.console_len;      // console_len counts every line ever (review I1)
+  if (S.console.length > 4000) S.console = S.console.slice(-2000);     // the page shows the last 400; console.log has all
+  S.runView = r;
+  if (S.sel === r.stage && S.tab === "stage") renderRun();
+  if (S.tab === "arm") updateArm(r);
+  $("#stop").disabled = !r.running;
+  if (r.running) setTimeout(pollRun, 300);
+  else { refresh(); if (S.tab === "stage") setTimeout(renderStage, 300); }
+}
+
+function renderRun() {
+  const r = S.runView; if (!r || !$("#runpane")) return;
+  let h = `<div class="card"><h4>${r.running ? "Running" : "Finished"}: ${esc(r.run_id)} ${r.running ? "" : `(exit ${esc(r.exit_code)})`}</h4>`;
+  h += r.questions.map(q => `<div class="q"><b>Question:</b> ${esc(q.question)}<br>
+       <button class="act" data-ans="${q.id}" data-t="yes">Yes</button> <button class="ghost" data-ans="${q.id}" data-t="no">No</button></div>`).join("");
+  h += `<pre class="console" id="cons">${esc(S.console.slice(-400).join("\n"))}</pre>`;
+  if (r.live && (r.live.n_cmd || r.live.n_state)) {
+    h += `<div class="legend">Joint <select id="jsel">${[1,2,3,4,5,6].map(j => `<option value="${j-1}" ${j-1 === S.joint ? "selected" : ""}>J${j}</option>`).join("")}</select>
+          <span style="color:var(--accent)">— commanded (arm_cmd)</span><span style="color:var(--stale)">— state stream (robot_state)</span>
+          <span class="muted">${r.live.n_cmd} pushes, ${r.live.n_state} packets</span></div>${plot(r.live)}`;
+  }
+  if (!r.running) h += `<p>When it has finished, use “review / accept” in Recent runs.</p>`;
+  h += `</div>`;
+  $("#runpane").innerHTML = h;
+  const c = $("#cons"); if (c) c.scrollTop = c.scrollHeight;
+  document.querySelectorAll("[data-ans]").forEach(b => b.onclick = async () => {
+    try { await api("/api/answer", {id:+b.dataset.ans, text:b.dataset.t, run_id:r.run_id}); } catch (e) { alert(e.message); } });
+  if ($("#jsel")) $("#jsel").onchange = e => { S.joint = +e.target.value; renderRun(); };
+}
+
+function plot(live) {
+  const j = S.joint, W = 800, H = 220, P = 34;
+  const a = live.cmd.map(([t, q]) => [t, q[j]]), b = live.state.map(([t, q]) => [t, q[j]]);
+  const all = a.concat(b); if (!all.length) return "";
+  let t0 = Math.min(...all.map(p => p[0])), t1 = Math.max(...all.map(p => p[0]));
+  let y0 = Math.min(...all.map(p => p[1])), y1 = Math.max(...all.map(p => p[1]));
+  if (t1 - t0 < 1e-6) t1 = t0 + 1; if (y1 - y0 < 1e-3) { y0 -= 0.5; y1 += 0.5; }
+  const X = t => P + (t - t0) / (t1 - t0) * (W - 2 * P), Y = y => H - P + (y0 - y) / (y1 - y0) * (H - 2 * P);
+  const line = (pts, col) => `<polyline fill="none" stroke="${col}" stroke-width="1.5" points="${pts.map(p => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}"/>`;
+  return `<svg class="plot" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <text x="4" y="14" font-size="11" fill="currentColor">${y1.toFixed(2)}°</text><text x="4" y="${H - P}" font-size="11" fill="currentColor">${y0.toFixed(2)}°</text>
+    <text x="${W - 60}" y="${H - 8}" font-size="11" fill="currentColor">${(t1 - t0).toFixed(1)} s</text>
+    ${line(a, "var(--accent)")}${line(b, "var(--stale)")}</svg>`;
+}
+
+function coeffTable(rows, editable) {
+  return `<table><tr><th>name</th><th>value</th><th>unit</th><th>range</th><th>marker</th><th>source</th></tr>${rows.map(r => `<tr title="${esc(r.doc)} (${esc(r.from)})">
+    <td>${esc(r.name)}</td><td>${editable && r.editable ? `<input type="text" size="14" data-c="${esc(r.name)}" value="${esc(JSON.stringify(r.value))}">` : esc(JSON.stringify(r.value))}${r.error ? ` <span class="err">${esc(r.error)}</span>` : ""}</td>
+    <td>${esc(r.unit)}</td><td>${esc(r.range ? JSON.stringify(r.range) : r.values ? r.values.join(" | ") : "")}</td>
+    <td>${esc(r.marker)}</td><td class="muted">${esc(r.source)}${r.note ? " · " + esc(r.note) : ""}</td></tr>`).join("")}</table>`;
+}
+
+async function renderCoeffs() {
+  const c = await api("/api/coeffs");
+  const byStage = {};
+  c.rows.forEach(r => (byStage[r.num + " " + r.stage] = byStage[r.num + " " + r.stage] || []).push(r));
+  let h = `<div class="card"><h2>Coefficients · version ${c.version}</h2><p class="muted">Every edit needs a note and makes a new version; values outside their range are refused.
+     Changing a coefficient makes its stage and every stage downstream of it stale. Values whose home is a file or a code constant are shown, not edited, here.</p>
+     <p><label>Note (required): <input id="cnote" type="text" size="60"></label> <button class="act" id="csave">Save as a new version</button></p><div id="cres"></div></div>`;
+  for (const [k, rows] of Object.entries(byStage)) h += `<div class="card"><h4>${esc(k)}</h4>${coeffTable(rows, true)}</div>`;
+  h += `<div class="card"><h4>Versions</h4><table><tr><th>v</th><th>when (UTC)</th><th>note</th><th>changed</th><th></th></tr>${c.versions.slice().reverse().map(v =>
+       `<tr><td>${v.version}</td><td>${esc(v.created_utc)}</td><td>${esc(v.note)}</td><td>${esc((v.changed || []).slice(0, 8).join(", "))}${(v.changed || []).length > 8 ? " …" : ""}</td>
+        <td>${v.version !== c.version ? `<button class="ghost" data-diff="${v.version}">diff vs current</button> <button class="ghost" data-rev="${v.version}">revert to this</button>` : "current"}</td></tr>`).join("")}</table><div id="vdiff"></div></div>`;
+  $("#pane").innerHTML = h;
+  $("#csave").onclick = async () => {
+    const changes = {};
+    for (const i of document.querySelectorAll("[data-c]")) {
+      const row = c.rows.find(r => r.name === i.dataset.c);
+      if (i.value !== JSON.stringify(row.value)) {
+        try { changes[i.dataset.c] = JSON.parse(i.value); } catch (e) { changes[i.dataset.c] = i.value; }
+      }
+    }
+    try { const r = await api("/api/coeffs", {changes, note:$("#cnote").value});
+          $("#cres").innerHTML = `<p class="passed">Version ${r.version}. Now stale: ${esc(r.stale.join(", ") || "nothing")}</p>` + diffTable(r.diff); refresh(); }
+    catch (e) { $("#cres").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  };
+  document.querySelectorAll("[data-diff]").forEach(b => b.onclick = async () => {
+    $("#vdiff").innerHTML = diffTable(await api(`/api/coeffs/diff?a=${b.dataset.diff}&b=${c.version}`)); });
+  document.querySelectorAll("[data-rev]").forEach(b => b.onclick = async () => {
+    const note = prompt(`Revert to version ${b.dataset.rev}: note (required)`); if (!note) return;
+    try { const r = await api("/api/coeffs/revert", {to:+b.dataset.rev, note}); alert(`Version ${r.version} made.`); renderCoeffs(); refresh(); }
+    catch (e) { alert(e.message); } });
+}
+
+function diffTable(diff) {
+  return `<table class="diff"><tr><th>name</th><th>old</th><th>new</th><th>source</th></tr>${diff.map(d =>
+    `<tr><td>${esc(d.name)}</td><td class="old">${esc(JSON.stringify(d.old))}</td><td class="new">${esc(JSON.stringify(d.new))} ${esc(d.unit || "")}</td><td class="muted">${esc(d.new_source)}</td></tr>`).join("")}</table>`;
+}
+
+async function renderLimits() {
+  const c = await api("/api/confirmed");
+  $("#pane").innerHTML = `<div class="card"><h2>Speed limits: ${esc(c.path)}</h2>
+    <p>Read-only. Only the owner changes these. Every tool refuses any motion above them, whoever starts it.
+    ${c.uncommitted ? `<span class="warn">The file has uncommitted changes: commit it as its own commit.</span>` : ""}</p>
+    <table>${Object.entries(c.values).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table></div>
+    <div class="card"><h4>Owner change (typed confirmation)</h4>
+    <p class="muted">Enter only the values to change. The workbench writes the file, adds the journal line and the audit event; you then commit it.</p>
+    <table>${Object.keys(c.values).map(k => `<tr><td>${esc(k)}</td><td><input type="number" step="any" data-l="${k}" placeholder="${esc(c.values[k])}"></td></tr>`).join("")}</table>
+    <p><label>What was seen at the previous step (required): <input id="lnote" type="text" size="60"></label></p>
+    <p><label>Type “${esc(c.phrase)}”: <input id="lphrase" type="text" size="30"></label> <button class="act" id="lsave">Write confirmed.yaml</button></p><div id="lres"></div></div>`;
+  $("#lsave").onclick = async () => {
+    const changes = {};
+    document.querySelectorAll("[data-l]").forEach(i => { if (i.value !== "") changes[i.dataset.l] = parseFloat(i.value); });
+    try { const r = await api("/api/confirmed", {changes, phrase:$("#lphrase").value, note:$("#lnote").value});
+          $("#lres").innerHTML = `<p class="passed">Written. Commit it: <code>${esc(r.commit)}</code></p>`; refresh(); }
+    catch (e) { $("#lres").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  };
+}
+
+async function renderAudit() {
+  const a = await api("/api/audit");
+  $("#pane").innerHTML = `<div class="card"><h2>Audit</h2><table>${a.slice().reverse().map(e => `<tr><td>${esc(e.utc)}</td><td>${esc(e.kind)}</td>
+    <td>${esc(e.stage || "")}</td><td class="muted">${esc(JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !["utc","kind","stage"].includes(k)))))}</td></tr>`).join("")}</table></div>`;
+}
+
+
+// ------------------------------------------------------------------ Arm control: jog, points, diagram
+const ROLE_ORDER = {start:0, middle:1, end:2};
+function ordered() { return S.points.slice().sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role]); }
+function labelOf(p, i) { return p.role === "start" ? "S" : p.role === "end" ? "E" : String(i); }
+
+async function renderArm() {
+  try { S.paths = await api("/api/points"); } catch (e) { S.paths = {}; }
+  let st;
+  try { st = await api("/api/stage/arm_control"); } catch (e) { $("#pane").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  S.armStage = st;
+  S.armMode = S.armMode || "mock";
+  const hp = S.ov && S.ov.host_problem;
+  $("#pane").innerHTML = `<div class="armgrid"><div>
+    <div class="card"><h2>Arm control</h2>
+      <p class="muted">Move the arm slowly with the buttons. Every move is a straight line with the cup's orientation held,
+      at the jog speed, never above confirmed.yaml. STOP (top right) halts the move and ends the session. Keep the e-stop within reach.</p>
+      <div class="modes">Mode: ${["dry-run", "mock", "arm"].map(m => `<button class="ghost ${m === S.armMode ? "on" : ""}" data-am="${m}"
+         ${m === "arm" && hp ? "disabled title='arm runs only on the Linux machine'" : ""}>${m === "dry-run" ? "dry run" : m}</button>`).join("")}
+         <span class="muted">${hp ? "arm: Linux machine only" : ""}</span></div>
+      ${S.armMode !== "arm" ? `<label style="display:block;margin-top:6px"><input type="checkbox" id="apractice" ${S.practice !== false ? "checked" : ""}>
+        Practice: use the mock's limits (needed until the arm's limits are read in stage 1.1; never counts for the arm)</label>` : ""}
+      <p><button class="act big" id="aconnect">Connect and enable</button> <button class="ghost big" id="aend">End session</button></p>
+      <p id="astatus"></p><div id="aidle"></div><div id="aquest"></div><p class="muted" id="aset"></p>
+    </div>
+    <div class="card"><h4>Where the cup is</h4>
+      <div class="views"><figure><figcaption>From above (X →, Y ↑)</figcaption><svg class="view" id="vtop" viewBox="0 0 320 320"></svg></figure>
+        <figure><figcaption>From the side (X →, Z ↑)</figcaption><svg class="view" id="vside" viewBox="0 0 320 320"></svg></figure></div>
+      <p class="pos" id="apos">—</p>
+      <p class="muted">● now · <b style="color:var(--ok)">S</b> start · <b style="color:var(--accent)">1, 2…</b> middle points · <b style="color:var(--bad)">E</b> end ·
+        dashed box: how far moves may go from where the session started (jog_box_mm). Base-frame mm, as ReadActPos reports them;
+        on the first step of each axis, check that the arm moves the way the arrow says.</p>
+    </div></div>
+    <div>
+    <div class="card"><h4>Move</h4>
+      <div class="steps">Step: ${[1, 5, 10, 25, 50].map(s => `<button class="ghost ${s === S.step ? "on" : ""}" data-step="${s}">${s} mm</button>`).join(" ")}</div>
+      <div style="display:flex;align-items:center;margin-top:12px">
+        <div class="pad"><span></span><button data-j="y,1">↑ Y+</button><span></span>
+          <button data-j="x,-1">← X−</button><span></span><button data-j="x,1">X+ →</button>
+          <span></span><button data-j="y,-1">↓ Y−</button><span></span></div>
+        <div class="zpad"><button data-j="z,1">▲ Z+ up</button><button data-j="z,-1">▼ Z− down</button></div>
+      </div>
+      <p id="amsg" class="muted"></p>
+    </div>
+    <div class="card"><h4>Start, middle and end points</h4>
+      <p><button class="ghost" id="pstart">Set START here</button> <button class="ghost" id="pmid">Add MIDDLE here</button>
+         <button class="ghost" id="pend">Set END here</button></p>
+      <div id="plist"></div>
+      <p><button class="act" id="pgostart">Go to start</button> <button class="act" id="prun">Run path: start → middles → end</button></p>
+      <p class="muted" id="pdwell"></p>
+      <p><label>Path name <input type="text" id="pname" size="14" value="${esc(S.pathName)}"></label> <button class="ghost" id="psave">Save</button>
+         <label>Load <select id="pload"><option value="">—</option>${Object.keys(S.paths).map(n => `<option>${esc(n)}</option>`).join("")}</select></label></p>
+      <p id="pmsg" class="muted"></p>
+    </div></div></div>`;
+  document.querySelectorAll("[data-am]").forEach(b => b.onclick = () => { S.armMode = b.dataset.am; renderArm(); });
+  document.querySelectorAll("[data-step]").forEach(b => b.onclick = () => { S.step = +b.dataset.step;
+    document.querySelectorAll("[data-step]").forEach(x => x.classList.toggle("on", +x.dataset.step === S.step)); });
+  document.querySelectorAll("[data-j]").forEach(b => b.onclick = () => {
+    const [axis, dir] = b.dataset.j.split(","); armCmd("jog", {axis, dir:+dir, step_mm:S.step}); });
+  $("#aconnect").onclick = armConnect;
+  $("#aend").onclick = () => armCmd("end", {});
+  $("#pstart").onclick = () => addPoint("start"); $("#pmid").onclick = () => addPoint("middle"); $("#pend").onclick = () => addPoint("end");
+  $("#pgostart").onclick = () => { const s = S.points.find(p => p.role === "start"); if (!s) return msg("#pmsg", "Set a start point first.", true);
+    if (confirm("Move in a straight line to the start point?")) armCmd("goto", {point:s}); };
+  $("#prun").onclick = runPath;
+  $("#psave").onclick = savePath;
+  $("#pload").onchange = e => { const p = S.paths[e.target.value]; if (p) { S.points = p.points.map(x => ({...x})); S.pathName = p.name; $("#pname").value = p.name; updateArm(armView()); } };
+  updateArm(armView());
+}
+
+function armView() { return S.runView && S.runView.stage === "arm_control" ? S.runView : null; }
+function msg(sel, text, bad) { const el = $(sel); if (el) { el.textContent = text; el.className = bad ? "err" : "muted"; } }
+
+async function armConnect() {
+  const practising = S.armMode !== "arm" && $("#apractice") && $("#apractice").checked;
+  const locks = practising ? [] : (S.armStage.locks[S.armMode] || []);
+  let reason = null;
+  if (locks.length) {
+    if (!locks.every(l => l.overridable)) return msg("#astatus", locks.map(l => l.reason).join("; "), true);
+    reason = prompt("Locked: " + locks.map(l => l.reason).join("; ") + "\nType a reason to override (it is logged), or cancel.");
+    if (!reason) return;
+  }
+  if (S.armMode === "arm" && !confirm("Connect to the REAL ARM and enable it? The e-stop must be within reach.")) return;
+  try {
+    const practice = S.armMode !== "arm" && !!($("#apractice") && $("#apractice").checked);
+    S.practice = practice;
+    await api("/api/run", {stage:"arm_control", mode:S.armMode, note:"arm control", assume_yes:S.armMode !== "arm", options:{},
+                           override_reason:practice ? null : reason, practice});
+    S.runSince = 0; S.console = []; S.runView = null; await refresh(); pollRun();
+  } catch (e) { msg("#astatus", "Refused: " + e.message, true); }
+}
+
+async function armCmd(name, args) {
+  try { await api("/api/cmd", {name, args, run_id:runId()}); msg("#amsg", name === "end" ? "Ending the session…" : name === "keep" ? "Still connected." : "Moving…"); }
+  catch (e) { msg("#amsg", e.message, true); }
+}
+
+function addPoint(role) {
+  const r = armView();
+  if (!r || !r.arm || !r.arm.pose) return msg("#pmsg", "Connect first: points are taken from where the arm is now.", true);
+  const p = r.arm.pose;
+  const pt = {role, pose:p.pose.slice(), tool:p.tool.slice(), user:p.user.slice(), joints:(p.joints || []).slice()};
+  if (role !== "middle") S.points = S.points.filter(x => x.role !== role);
+  pt.name = role === "middle" ? "M" + (S.points.filter(x => x.role === "middle").length + 1) : role;
+  S.points.push(pt);
+  msg("#pmsg", `${role} point set at X ${p.pose[0].toFixed(1)}, Y ${p.pose[1].toFixed(1)}, Z ${p.pose[2].toFixed(1)} mm. Save the path to keep it.`);
+  updateArm(r);
+}
+
+function runPath() {
+  const pts = ordered();
+  if (!pts.some(p => p.role === "start") || !pts.some(p => p.role === "end")) return msg("#pmsg", "Set a start and an end point first.", true);
+  const r = armView(), dwell = r && r.arm.ready ? r.arm.ready.settings.path_dwell_s : null;
+  if (!confirm(`Run the path: ${pts.length} points, straight lines between them, ${dwell} s pause at each?`)) return;
+  armCmd("path", {points:pts, dwell_s:dwell});
+}
+
+async function savePath() {
+  const name = $("#pname").value.trim();
+  try { await api("/api/points", {name, points:ordered(), note:""}); S.pathName = name; S.paths = await api("/api/points"); msg("#pmsg", `Saved as ${name}.`); }
+  catch (e) { msg("#pmsg", e.message, true); }
+}
+
+function updateArm(r) {
+  if (S.tab !== "arm" || !$("#astatus")) return;
+  const running = S.ov && S.ov.run && S.ov.run.running;
+  const conn = r && r.running, ready = conn && r.arm && r.arm.ready, busy = conn && r.arm && r.arm.busy;
+  const other = running && S.ov.run.stage !== "arm_control";
+  $("#aconnect").disabled = !!(conn || other);
+  $("#aend").disabled = !ready || !!busy;
+  const canMove = !!(ready && !busy);
+  document.querySelectorAll("[data-j], #pgostart, #prun").forEach(b => b.disabled = !canMove);
+  document.querySelectorAll("#pstart, #pmid, #pend").forEach(b => b.disabled = !(ready && r.arm.pose));
+  if (ready) document.querySelectorAll("[data-step]").forEach(b => b.disabled = +b.dataset.step > r.arm.ready.settings.jog_max_step_mm);
+  const idled = r && r.arm && r.arm.idle_timeout;
+  const status = other ? `Another stage is running (${S.ov.run.stage}).` : !conn ? (idled ? `Session ended after ${idled.after_s} s without a command; the arm was disabled.`
+    : r ? `Session ended (exit code ${r.exit_code}).` : "Not connected.")
+    : !ready ? "Connecting: answer the questions below." : busy ? (r.arm.progress ? `Running the path: point ${r.arm.progress.step} of ${r.arm.progress.of}…` : "Moving…") : "Ready. The arm is enabled.";
+  msg("#astatus", status, !!(r && !conn && r.exit_code));
+  const left = ready && r.arm.pose ? r.arm.pose.idle_left_s : null;
+  const tmo = ready ? r.arm.ready.settings.jog_idle_timeout_s : null;
+  const warnAt = tmo ? Math.min(60, tmo / 2) : 0;
+  $("#aidle").innerHTML = ready && !busy && left != null && left <= warnAt
+    ? `<div class="q"><b>No command for a while.</b> The session ends and the arm is disabled in ${Math.max(0, Math.round(left))} s.
+       <button class="act" id="akeep">Keep connected</button></div>` : "";
+  if ($("#akeep")) $("#akeep").onclick = () => armCmd("keep", {});
+  $("#aquest").innerHTML = conn ? r.questions.map(q => `<div class="q"><b>Question:</b> ${esc(q.question)}<br>
+     <button class="act" data-aans="${q.id}" data-t="yes">Yes</button> <button class="ghost" data-aans="${q.id}" data-t="no">No</button></div>`).join("") : "";
+  document.querySelectorAll("[data-aans]").forEach(b => b.onclick = async () => {
+    try { await api("/api/answer", {id:+b.dataset.aans, text:b.dataset.t, run_id:r.run_id}); } catch (e) { alert(e.message); } });
+  if (ready) {
+    const s = r.arm.ready.settings, c = r.arm.ready.confirmed;
+    $("#aset").textContent = `Speed ${s.jog_speed_mm_s} mm/s, acceleration ${s.jog_acc_mm_s2} mm/s² (confirmed limits ${c.linear_speed_mm_s} mm/s, ${c.linear_acc_mm_s2} mm/s²). ` +
+      `Largest step ${s.jog_max_step_mm} mm. Box ±${s.jog_box_mm.join(" / ")} mm. Ends by itself after ${s.jog_idle_timeout_s} s without a command. ` +
+      `Change these on the Coefficients tab (stage 1.6).`;
+    $("#pdwell").textContent = `Pause at each point: ${s.path_dwell_s} s (path_dwell_s).`;
+  }
+  if (r && r.results) {
+    const last = Object.values(r.results).slice(-1)[0];
+    if (last && !busy) msg("#amsg", last.ok ? "Done." : "Refused: " + last.error, !last.ok);
+  }
+  const pose = conn && r.arm.pose ? r.arm.pose : null;
+  $("#apos").textContent = pose ? `X ${pose.pose[0].toFixed(1)}  Y ${pose.pose[1].toFixed(1)}  Z ${pose.pose[2].toFixed(1)} mm   ` +
+    `Rx ${pose.pose[3].toFixed(1)}  Ry ${pose.pose[4].toFixed(1)}  Rz ${pose.pose[5].toFixed(1)}°` : "—";
+  const pts = ordered(); let mi = 0;
+  $("#plist").innerHTML = pts.length ? `<table><tr><th></th><th>X</th><th>Y</th><th>Z (mm)</th><th></th></tr>${pts.map((p, i) => {
+      const lab = labelOf(p, p.role === "middle" ? ++mi : 0);
+      return `<tr><td><b>${lab}</b></td><td>${p.pose[0].toFixed(1)}</td><td>${p.pose[1].toFixed(1)}</td><td>${p.pose[2].toFixed(1)}</td>
+        <td><button class="ghost" data-pgo="${i}" ${canMove ? "" : "disabled"}>Go to</button>
+            ${p.role === "middle" ? `<button class="ghost" data-pup="${i}">↑</button><button class="ghost" data-pdn="${i}">↓</button>` : ""}
+            <button class="ghost" data-pdel="${i}">✕</button></td></tr>`; }).join("")}</table>` : `<p class="muted">No points yet. Jog to a place and press Set START here.</p>`;
+  document.querySelectorAll("[data-pgo]").forEach(b => b.onclick = () => { const p = ordered()[+b.dataset.pgo];
+    if (confirm(`Move in a straight line to ${p.name}?`)) armCmd("goto", {point:p}); });
+  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => { const p = ordered()[+b.dataset.pdel]; S.points = S.points.filter(x => x !== p); updateArm(armView()); });
+  const move = (i, d) => { const o = ordered(), a = o[i], b2 = o[i + d]; if (!b2 || b2.role !== "middle") return;
+    const ia = S.points.indexOf(a), ib = S.points.indexOf(b2); [S.points[ia], S.points[ib]] = [S.points[ib], S.points[ia]]; updateArm(armView()); };
+  document.querySelectorAll("[data-pup]").forEach(b => b.onclick = () => move(+b.dataset.pup, -1));
+  document.querySelectorAll("[data-pdn]").forEach(b => b.onclick = () => move(+b.dataset.pdn, 1));
+  drawView("#vtop", 0, 1, r); drawView("#vside", 0, 2, r);
+}
+
+function drawView(sel, ia, ib, r) {
+  const svg = $(sel); if (!svg) return;
+  const live = r && r.running && r.arm;
+  const ready = live && r.arm.ready, pose = live && r.arm.pose;
+  const home = ready ? r.arm.ready.home : null, box = ready ? r.arm.ready.settings.jog_box_mm : null;
+  const pts = ordered();
+  const c = home || (pose && pose.pose) || (pts[0] && pts[0].pose) || [0, 0, 0];
+  const H = box ? Math.max(box[ia], box[ib]) * 1.25 : 300;
+  const X = v => 160 + (v - c[ia]) / H * 140, Y = v => 160 - (v - c[ib]) / H * 140;
+  const g = [10, 20, 25, 50, 100, 200, 500].find(s => H / s <= 4) || 1000;
+  let h = "";
+  for (let k = Math.ceil((c[ia] - H * 1.15) / g); k * g <= c[ia] + H * 1.15; k++)
+    h += `<line x1="${X(k * g)}" y1="0" x2="${X(k * g)}" y2="320" stroke="var(--line)" stroke-width="0.5"/>`;
+  for (let k = Math.ceil((c[ib] - H * 1.15) / g); k * g <= c[ib] + H * 1.15; k++)
+    h += `<line x1="0" y1="${Y(k * g)}" x2="320" y2="${Y(k * g)}" stroke="var(--line)" stroke-width="0.5"/>`;
+  h += `<text x="4" y="314" font-size="10" fill="var(--muted)">grid ${g} mm</text>`;
+  if (Math.abs(X(0) - 160) < 160 && Math.abs(Y(0) - 160) < 160)
+    h += `<rect x="${X(0) - 6}" y="${Y(0) - 6}" width="12" height="12" fill="none" stroke="var(--muted)"/><text x="${X(0) + 8}" y="${Y(0) - 8}" font-size="10" fill="var(--muted)">base</text>`;
+  if (home && box) h += `<rect x="${X(home[ia] - box[ia])}" y="${Y(home[ib] + box[ib])}" width="${X(home[ia] + box[ia]) - X(home[ia] - box[ia])}"
+      height="${Y(home[ib] - box[ib]) - Y(home[ib] + box[ib])}" fill="none" stroke="var(--stale)" stroke-dasharray="5 4"/>`;
+  if (pts.length > 1) h += `<polyline fill="none" stroke="var(--muted)" stroke-dasharray="3 3" stroke-width="1.5" points="${pts.map(p => X(p.pose[ia]) + "," + Y(p.pose[ib])).join(" ")}"/>`;
+  let mi = 0;
+  pts.forEach(p => { const col = p.role === "start" ? "var(--ok)" : p.role === "end" ? "var(--bad)" : "var(--accent)";
+    const lab = labelOf(p, p.role === "middle" ? ++mi : 0);
+    h += `<circle cx="${X(p.pose[ia])}" cy="${Y(p.pose[ib])}" r="7" fill="${col}"/><text x="${X(p.pose[ia])}" y="${Y(p.pose[ib]) + 3.5}" font-size="10" font-weight="700" text-anchor="middle" fill="#fff">${lab}</text>`; });
+  if (pose && pose.target) h += `<circle cx="${X(pose.target[ia])}" cy="${Y(pose.target[ib])}" r="8" fill="none" stroke="var(--ink)" stroke-dasharray="2 2"/>`;
+  if (pose) h += `<circle cx="${X(pose.pose[ia])}" cy="${Y(pose.pose[ib])}" r="6" fill="var(--ink)"/><circle cx="${X(pose.pose[ia])}" cy="${Y(pose.pose[ib])}" r="10" fill="none" stroke="var(--ink)"/>`;
+  else h += `<text x="160" y="150" font-size="12" text-anchor="middle" fill="var(--muted)">connect to see the arm</text>`;
+  svg.innerHTML = h;
+}
+
+
+// ------------------------------------------------------------------ Past runs and Backup
+const fmtBytes = b => b == null ? "-" : b >= 1e9 ? (b / 1e9).toFixed(2) + " GB" : b >= 1e6 ? (b / 1e6).toFixed(1) + " MB" : (b / 1e3).toFixed(0) + " kB";
+const fmtWhen = n => n ? n.slice(0, 10) + " " + n.slice(11, 13) + ":" + n.slice(13, 15) + ":" + n.slice(15, 17) : "";
+
+async function renderPast() {
+  S.pastSource = S.pastSource || "data";
+  let r;
+  try { r = await api("/api/pastruns?source=" + S.pastSource); } catch (e) { $("#pane").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const stages = [...new Set(r.runs.map(x => x.stage).filter(Boolean))].sort();
+  const f = S.pastFilter || "";
+  const rows = r.runs.filter(x => !f || x.stage === f);
+  $("#pane").innerHTML = `<div class="card"><h2>Past runs</h2>
+    <p class="muted">One folder per run: summary, the whole console, questions and answers, commands, config, coefficient version and the trial log.
+      Folders are never changed after the run ends. Times here are local (the folder names); run and trial ids and the
+      journal use UTC. ${esc(r.root || "")}</p>
+    <div class="modes">Where: <button class="ghost ${S.pastSource === "data" ? "on" : ""}" data-src="data">this PC (data/runs)</button>
+      <button class="ghost ${S.pastSource === "backup" ? "on" : ""}" data-src="backup">backup folder</button>
+      <label style="margin-left:12px">Stage <select id="pfilter"><option value="">all</option>${stages.map(s => `<option ${s === f ? "selected" : ""}>${esc(s)}</option>`).join("")}</select></label>
+      <span class="muted">${rows.length} run(s)</span></div>
+    <table style="margin-top:8px"><tr><th>when (local)</th><th>stage</th><th>mode</th><th>result</th><th>exit</th><th>trial</th><th>folder</th></tr>
+    ${rows.map(x => `<tr class="srow" data-run="${esc(x.name)}" style="display:table-row"><td>${esc(fmtWhen(x.name))}</td>
+      <td>${esc(x.stage_num || "")} ${esc(x.stage || "")}</td><td>${esc(x.mode || "")}${x.practice ? " <span class='tag'>practice</span>" : ""}</td>
+      <td class="${x.auto_ok ? "passed" : x.result.startsWith("RECON") || x.result.startsWith("RUNNING") ? "notrun" : "failed"}">${esc(x.result.split(" (")[0])}</td>
+      <td>${esc(x.exit_code ?? "")}</td><td>${fmtBytes(x.trial_bytes)}</td><td>${fmtBytes(x.folder_bytes)}</td></tr>`).join("") || "<tr><td colspan=7 class='muted'>no runs here yet</td></tr>"}
+    </table></div><div id="pastdetail"></div>`;
+  document.querySelectorAll("[data-src]").forEach(b => b.onclick = () => { S.pastSource = b.dataset.src; S.pastFilter = ""; renderPast(); });
+  $("#pfilter").onchange = e => { S.pastFilter = e.target.value; renderPast(); };
+  document.querySelectorAll("[data-run]").forEach(el => el.onclick = () => showPast(el.dataset.run));
+  if (S.pastSel && rows.some(x => x.name === S.pastSel)) showPast(S.pastSel);
+}
+
+async function showPast(name) {
+  S.pastSel = name;
+  let d;
+  try { d = await api(`/api/pastrun?name=${encodeURIComponent(name)}&source=${S.pastSource}`); }
+  catch (e) { $("#pastdetail").innerHTML = `<div class="card err">${esc(e.message)}</div>`; return; }
+  S.pastDetail = d;
+  const qs = d.questions.filter(q => q.event === "asked" || q.event === "from the trial log");
+  const ans = d.questions.filter(q => q.event === "answered");
+  $("#pastdetail").innerHTML = `<div class="card"><h4>${esc(name)}</h4>
+    <p><button class="act" id="popen">Open folder</button>
+       ${d.source === "backup" ? `<button class="ghost" id="prestore">Restore to this PC</button>` : ""}
+       <span class="muted">${esc(d.path)}</span></p><div id="pastmsg"></div>
+    <pre class="console">${esc(d.summary || "(no summary: this run had not ended)")}</pre>
+    ${d.plot && (d.plot.n_cmd || d.plot.n_state) ? `<h4>Joints</h4><div class="legend">Joint <select id="pjsel">${[1,2,3,4,5,6].map(j => `<option value="${j-1}" ${j-1 === S.joint ? "selected" : ""}>J${j}</option>`).join("")}</select>
+      <span style="color:var(--accent)">— commanded</span><span style="color:var(--stale)">— state stream</span>
+      <span class="muted">${d.plot.n_cmd} commands, ${d.plot.n_state} packets</span></div><div id="pplot">${plot(d.plot)}</div>` : `<p class="muted">No joint data in this run's trial log.</p>`}
+    <h4>Questions and answers</h4>${qs.length ? `<table>${d.questions.map(q => `<tr><td class="muted">${esc((q.t || "").slice(11, 19))}</td>
+      <td>${q.event === "answered" ? "→ <b>" + esc(q.answer) + "</b> <span class='muted'>(" + esc(q.by || "") + ")</span>" : esc(q.question || q.text)}</td></tr>`).join("")}</table>` : "<p class='muted'>none</p>"}
+    <h4>Commands</h4>${d.commands.length ? `<table>${d.commands.filter(c => c.event !== "busy").map(c => `<tr><td class="muted">${esc((c.t || "").slice(11, 19))}</td>
+      <td>${esc(c.event)}</td><td>${c.event === "sent" ? esc(c.name + " " + JSON.stringify(c.args).slice(0, 140)) : c.event === "done" ? (c.ok ? "ok" : "<span class='failed'>refused: " + esc(c.error) + "</span>") : esc(JSON.stringify(c).slice(0, 140))}</td></tr>`).join("")}</table>` : "<p class='muted'>none</p>"}
+    <h4>Console</h4><pre class="console" style="max-height:420px">${esc(d.console || "")}</pre>
+    <details><summary>files in the folder</summary><pre class="console">${esc(d.files.join("\n"))}</pre></details></div>`;
+  $("#popen").onclick = async () => { try { const r = await api("/api/pastrun/open", {name, source:S.pastSource});
+      msg("#pastmsg", r.opened ? "Opened " + r.opened : `${r.note}: ${r.path}`, !r.opened); } catch (e) { msg("#pastmsg", e.message, true); } };
+  if ($("#pjsel")) $("#pjsel").onchange = e => { S.joint = +e.target.value; $("#pplot").innerHTML = plot(S.pastDetail.plot); };
+  if ($("#prestore")) $("#prestore").onclick = () => restoreRun(name, false);
+  $("#pastdetail").scrollIntoView({behavior:"smooth"});
+}
+
+async function restoreRun(name, overwrite) {
+  try {
+    const r = await api("/api/backup/restore", {name, overwrite});
+    if (r.needs_confirmation) {
+      const ok = confirm(`These files on this PC differ from the backup:\n\n${r.differ.join("\n")}\n\nReplace them with the backup's copies? ` +
+                         `The current files are kept beside them (renamed …before-restore-…), not deleted.`);
+      if (ok) return restoreRun(name, true);
+      return msg("#pastmsg", "Nothing was changed.");
+    }
+    msg("#pastmsg", r.restored.length ? `Restored ${r.restored.length} file(s)` + (r.kept_aside.length ? `; kept ${r.kept_aside.length} current file(s) aside.` : ".")
+                                      : "This PC already has the same run; nothing to restore.");
+  } catch (e) { msg("#pastmsg", e.message, true); }
+}
+
+async function renderBackup() {
+  let b;
+  try { b = await api("/api/backup"); } catch (e) { $("#pane").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  const last = b.last_backup, d = b.data;
+  $("#pane").innerHTML = `<div class="card"><h2>Backup</h2>
+    <p class="muted">Copies new run folders and trial logs to a folder on this PC. It never deletes or overwrites anything there.
+      Images (.img) are copied only for eval and killtest trials, as in codebase plan §8. This copy is on the same disk as the data:
+      it protects against deleted or damaged files, not against a broken disk. The second disk and offsite copy are tools/backup.sh (§8).</p>
+    <table>
+      <tr><td>Backup folder</td><td><input type="text" id="bfolder" size="50" value="${esc(b.folder || b.suggested)}"> <button class="ghost" id="bset">Use this folder</button>
+        <span class="muted">for ${esc(b.machine || "this machine")}: each machine keeps its own</span></td></tr>
+      <tr><td>After every run</td><td><label><input type="checkbox" id="bauto" ${b.auto ? "checked" : ""}> back up automatically (it waits while a run is going on)</label></td></tr>
+      <tr><td>Last backup</td><td>${last ? esc(last.ended) + ` · ${last.copied_files} file(s), ${fmtBytes(last.copied_bytes)} copied` + (last.conflicts.length ? ` · <span class="failed">${last.conflicts.length} conflict(s)</span>` : "") + (last.errors.length ? ` · <span class="failed">error: ${esc(last.errors[0])}</span>` : "") : "never"}</td></tr>
+      <tr><td>The backup holds</td><td>${b.set_up ? `${b.runs_held ?? 0} run folder(s), ${b.trials_held ?? 0} trial log(s), ${fmtBytes(b.bytes_held)}` : (b.folder_problem ? `<span class="failed">${esc(b.folder_problem)}</span>` : "not set up yet")}</td></tr>
+      <tr><td>Free space there</td><td>${fmtBytes(b.free_bytes)}</td></tr>
+      <tr><td>This PC (data)</td><td>${d.runs} run folder(s) (${fmtBytes(d.run_folder_bytes)}), trial logs ${fmtBytes(d.trial_bytes)}, images ${fmtBytes(d.image_bytes)}; ${fmtBytes(d.free_bytes)} free</td></tr>
+      <tr><td>Now</td><td id="bnow">${b.running ? "backing up…" : "idle"}</td></tr>
+    </table>
+    <p><button class="act big" id="bgo">Back up now</button> <button class="ghost" id="bview">Open a run from the backup</button></p>
+    <div id="bmsg"></div>
+    ${b.last_report && b.last_report.conflicts.length ? `<h4>Conflicts (left as they were)</h4><pre class="console">${esc(b.last_report.conflicts.join("\n"))}</pre>` : ""}
+  </div>`;
+  $("#bset").onclick = async () => { try { const s = await api("/api/backup/settings", {folder:$("#bfolder").value.trim(), auto:$("#bauto").checked}); msg("#bmsg", "Backup folder: " + s.folder); renderBackup(); } catch (e) { msg("#bmsg", e.message, true); } };
+  $("#bauto").onchange = async () => { try { await api("/api/backup/settings", {folder:$("#bfolder").value.trim(), auto:$("#bauto").checked}); } catch (e) { msg("#bmsg", e.message, true); } };
+  $("#bgo").onclick = async () => { try { const r = await api("/api/backup/now", {}); msg("#bmsg", r.started ? "Backing up…" : r.note); pollBackup(); } catch (e) { msg("#bmsg", e.message, true); } };
+  $("#bview").onclick = () => { S.tab = "past"; S.pastSource = "backup"; setTab(); };
+  if (b.running) pollBackup();
+}
+
+async function pollBackup() {
+  let b; try { b = await api("/api/backup"); } catch (e) { return; }
+  if (S.tab !== "backup") return;
+  const p = b.progress;
+  if ($("#bnow")) $("#bnow").textContent = b.running ? (p ? (p.paused ? p.paused : `${p.phase}: ${p.done ?? 0} of ${p.of ?? "?"} (${p.item || ""})`) : "backing up…") : "idle";
+  if (b.running) setTimeout(pollBackup, 700); else renderBackup();
+}
+
+$("#stop").onclick = async () => { try { await api("/api/stop", {run_id:runId()}); } catch (e) { alert(e.message); } };
+refresh().then(() => { setTab(); if (S.ov && S.ov.run && S.ov.run.running) pollRun(); });
+setInterval(() => { if (!(S.runView && S.runView.running)) refresh(); }, 4000);
+</script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+# The log schema (codebase plan §5). The ONLY place a log field is defined.
+# Generates: analysis/logread/slog_v<N>.py (stdlib-only writer and reader, used by the Python
+# tools and by analysis), docs/data_dictionary.md, and later the C++ writer (gen_cpp.py).
+#
+#   python -m schema.gen_py          regenerate
+#   python -m schema.gen_py --check  CI: fail if the generated files are stale
+#   python -m schema.gen_py --freeze copy this file to versions/fields_v<N>.yaml
+#
+# Rules:
+# - Changes are additive and versioned (R-A). Version 1 is frozen at the first recording of
+#   real data (`--freeze`); after that, any change bumps schema_version, and old readers stay.
+# - Every record is a tag (u16), a length (u32) and a payload, little-endian (owner, week 1).
+#   Fixed streams keep fixed payloads; a `bytes` field is variable-length and must be last.
+#   A reader treats a truncated last record as the end of the trial, not an error, and skips
+#   tags it does not know.
+# - Names carry frame and units (F1); SI everywhere except pixels and the raw wire bytes (F4).
+# - Host times are CLOCK_MONOTONIC in ns: time.monotonic_ns() in Python (owner, week 1).
+# - Validity travels beside the data (RT5): no sentinels.
+#
+# Types: u8 u16 u32 u64 i32 i64 f64, fixed arrays as f64[6], and bytes (variable, last).
+
+schema_version: 1
+files:
+  bin: {magic: SLOSHLOG, doc: header + append-only tagged records}
+  img: {magic: SLOSHIMG, doc: append-only image records}
+
+streams:
+  - name: event
+    tag: 1
+    file: bin
+    since_version: 1
+    doc: Operator markers, phase transitions, errors converted at the RT3 sites, and JSON blocks (the arm block read at start-up, a tool's summary).
+    fields:
+      - {name: t_host_ns, type: i64, unit: ns, doc: host monotonic time}
+      - {name: kind, type: u16, unit: enum, doc: "1 marker, 2 phase, 3 error, 4 info, 5 arm_block (JSON), 6 summary (JSON), 7 refusal"}
+      - {name: text, type: bytes, unit: utf-8}
+
+  - name: wire_tx
+    tag: 2
+    file: bin
+    since_version: 1
+    doc: Every byte string sent to the arm, verbatim (LG4).
+    fields:
+      - {name: t_host_ns, type: i64, unit: ns, doc: host monotonic time just before the send}
+      - {name: port, type: u16, unit: "-", doc: "10003 for commands"}
+      - {name: data, type: bytes, unit: ascii}
+
+  - name: wire_rx
+    tag: 3
+    file: bin
+    since_version: 1
+    doc: Every chunk received from the arm on the command port, verbatim, as the socket returned it (LG4). Fragmentation is visible.
+    fields:
+      - {name: t_host_ns, type: i64, unit: ns, doc: host monotonic time just after the read}
+      - {name: port, type: u16, unit: "-"}
+      - {name: data, type: bytes, unit: ascii}
+
+  - name: state_raw
+    tag: 4
+    file: bin
+    since_version: 1
+    doc: Every Datasheet packet from port 10004 as bytes, header included (elfin_commands.md, PROTO p.185-188). The packet has no timestamp.
+    fields:
+      - {name: t_host_ns, type: i64, unit: ns, doc: host monotonic arrival}
+      - {name: data, type: bytes, unit: "-"}
+
+  - name: robot_state
+    tag: 5
+    file: bin
+    since_version: 1
+    doc: The parsed Datasheet, in SI. Groups the packet lacks have their valid bit cleared.
+    fields:
+      - {name: t_host_ns, type: i64, unit: ns, doc: host monotonic arrival of the packet}
+      - {name: valid, type: u16, unit: bits, doc: "bit0 q, bit1 qd, bit2 qdd, bit3 current, bit4 state fields"}
+      - {name: q_rad, type: "f64[6]", unit: rad, frame: joint, doc: Actual_Position J1-J6}
+      - {name: qd_rad_s, type: "f64[6]", unit: rad/s, frame: joint}
+      - {name: qdd_rad_s2, type: "f64[6]", unit: rad/s^2, frame: joint}
+      - {name: current_A, type: "f64[6]", unit: A, frame: joint}
+      - {name: robot_state, type: i32, unit: enum, doc: "StateAndError.robotState (table [MISSING])"}
+      - {name: enabled, type: u8, unit: bool}
+      - {name: paused, type: u8, unit: bool}
+      - {name: moving, type: u8, unit: bool}
+      - {name: blending_done, type: u8, unit: bool}
+      - {name: in_pos, type: u8, unit: bool}
+      - {name: error_axis, type: i32, unit: "-", doc: "Error_AxisID as reported (1-6 here, 0-5 in ReadRobotState [UNCLEAR])"}
+      - {name: error_code, type: i32, unit: "-"}
+
+  - name: arm_cmd
+    tag: 6
+    file: bin
+    since_version: 1
+    doc: One record per push (LG3). The degrees on the wire are in wire_tx.
+    fields:
+      - {name: push_id, type: u64, unit: "-"}
+      - {name: tick, type: i64, unit: "-", doc: the tick (or trajectory sample) whose q_cmd this push carries}
+      - {name: q_cmd_rad, type: "f64[6]", unit: rad, frame: joint}
+      - {name: t_slot_ns, type: i64, unit: ns, doc: the push slot this push belongs to}
+      - {name: t_send_ns, type: i64, unit: ns}
+
+  - name: arm_ack
+    tag: 7
+    file: bin
+    since_version: 1
+    doc: One record per reply to a push.
+    fields:
+      - {name: push_id, type: u64, unit: "-"}
+      - {name: tick, type: i64, unit: "-"}
+      - {name: status, type: u16, unit: enum, doc: "0 OK, 1 Fail, 2 unexpected reply, 3 no reply (timeout or closed)"}
+      - {name: fail_code_valid, type: u8, unit: bool}
+      - {name: fail_code, type: i64, unit: "-"}
+      - {name: t_reply_ns, type: i64, unit: ns}
+      - {name: reply_time_ns, type: i64, unit: ns, doc: t_reply_ns - t_send_ns}
+      - {name: late, type: u8, unit: bool, doc: "the push was sent after its slot had passed"}
+
+  - name: frame
+    tag: 8
+    file: bin
+    since_version: 1
+    doc: One record per camera frame.
+    fields:
+      - {name: frame_number, type: u64, unit: "-"}
+      - {name: cam_timestamp_ticks, type: u64, unit: camera ticks, doc: "raw; tick rate [MISSING] until measured"}
+      - {name: trigger_counter, type: u64, unit: "-"}
+      - {name: t_host_ns, type: i64, unit: ns, doc: host arrival}
+      - {name: exposure_s, type: f64, unit: s}
+      - {name: gain_db, type: f64, unit: dB}
+      - {name: dropped_count, type: u32, unit: "-", doc: frames dropped since the previous record}
+      - {name: image_stored, type: u8, unit: bool}
+      - {name: image_index, type: u64, unit: "-", doc: index of the image record; meaningful only if image_stored}
+
+  - name: sync
+    tag: 9
+    file: bin
+    since_version: 1
+    doc: LED commands timestamped at the tick, trigger pulses, electrode transitions.
+    fields:
+      - {name: t_host_ns, type: i64, unit: ns}
+      - {name: kind, type: u16, unit: enum, doc: "1 led_on, 2 led_off, 3 trigger_pulse, 4 electrode"}
+      - {name: value, type: i32, unit: "-"}
+
+  - name: image
+    tag: 1001
+    file: img
+    since_version: 1
+    doc: One stored image (codebase plan §5, image policy).
+    fields:
+      - {name: frame_number, type: u64, unit: "-"}
+      - {name: roi_x_px, type: u16, unit: px}
+      - {name: roi_y_px, type: u16, unit: px}
+      - {name: roi_w_px, type: u16, unit: px}
+      - {name: roi_h_px, type: u16, unit: px}
+      - {name: full_frame, type: u8, unit: bool}
+      - {name: compression, type: u8, unit: enum, doc: "0 none, 1 zstd"}
+      - {name: pixels, type: bytes, unit: Mono8}

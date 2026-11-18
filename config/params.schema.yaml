@@ -1,0 +1,822 @@
+# The model parameter set, defined once (codebase plan §4). It will generate the C++ struct,
+# the Python dataclass and the log header block. Identified values live in data/params/,
+# never here. kappa, R/L and chi are derived from h/R in the model layer and never stored.
+#
+# Block style only, so that tools/yamlmini.py (the workbench, standard library) reads this file
+# exactly as PyYAML does (tests/elfin/test_yamlmini.py).
+schema_version: 1
+fields:
+  omega0:
+    type: f64
+    unit: rad/s
+    source: shake ring-down
+  zeta:
+    type: f64
+    unit: "1"
+    source: shake ring-down
+  h:
+    type: f64
+    unit: m
+    source: rest level C0 through the calibrated geometry
+  m_l:
+    type: f64
+    unit: kg
+    source: rho_w * pi * R^2 * h
+  p_h:
+    type: f64
+    unit: m
+    source: theory or tilt kick
+  p_h_source:
+    type: enum
+    values: [theory, tilt_kick]
+  m1:
+    type: f64
+    unit: kg
+    source: theory only; documentation and the parked F/T pivot
+intervals:      # passed downstream (research plan §3.2)
+  omega0_rel:
+    type: f64
+    unit: "1"
+    nominal: 0.01
+  zeta_rel:
+    type: f64
+    unit: "1"
+    nominal: 0.30
+  h_abs:
+    type: f64
+    unit: m
+    nominal: 0.001
+  cubic_rel:
+    type: f64
+    unit: "1"
+    nominal: 0.20
+ids:
+  identification_trial_id:
+    type: str
+  calibration_id:
+    type: str
+  latency_record_ids:
+    type: str_list
+
+# ------------------------------------------------------------------------------------------------
+# Tunable coefficients (codebase plan §12): one definition each, grouped by the stage that owns it
+# (config/workbench/stages.yaml). The workbench's coefficient editor reads this section.
+#   type    f64 | int | str | enum | f64_list | bool
+#   range   [lo, hi], checked on every edit (elementwise for lists); values for an enum
+#   default the plan's value ("from" names the section); null where no source gives one
+#   marker  target | unverified | MISSING | proposal (mine, for the owner to confirm) | owner (decision)
+#           | plan (stated in a plan) | measured (set by a stage's accept)
+#   home    where the value lives: store (data/workbench/coeffs, the default), or
+#           file:<path>#<key.path> or code:<module>#<NAME>, shown read-only in the editor
+# Changing a value marks the owning stage and every stage downstream of it stale.
+# ------------------------------------------------------------------------------------------------
+tunables:
+  # -- 0.1 host check
+  data_free_gb_min:
+    stage: host_check
+    type: f64
+    unit: GB
+    range: [1.0, 100000.0]
+    default: 200.0
+    marker: proposal
+    from: codebase §5 sizing (about 2.9 GB per 30 s trial), §8
+    doc: Free space under data/ needed to start a session
+  # -- 0.2 pre-flight
+  nominal_fills:
+    stage: preflight
+    type: f64_list
+    unit: "1"
+    range: [0.3, 0.9]
+    default: [0.4, 0.6, 0.8]
+    marker: owner
+    from: research §0 (cup)
+    doc: Fill fractions of the 100 mm inner height
+  fill_tolerance_mm:
+    stage: preflight
+    type: f64
+    unit: mm
+    range: [0.1, 2.0]
+    default: 0.5
+    marker: target
+    from: research §3.1 item 2
+    doc: Allowed difference between the camera fill estimate and the height you measured
+  water_temp_range_c:
+    stage: preflight
+    type: f64_list
+    unit: degC
+    range: [5.0, 40.0]
+    default: [15.0, 30.0]
+    marker: proposal
+    from: none; the temperature is logged per session
+    doc: Water temperature outside this range is flagged
+  cup_inner_radius_m:
+    stage: preflight
+    type: f64
+    unit: m
+    home: file:config/cup/r40.yaml#inner_radius_m
+    marker: plan
+    from: research §0 (cup)
+    doc: Inner radius R
+  cup_inner_height_m:
+    stage: preflight
+    type: f64
+    unit: m
+    home: file:config/cup/r40.yaml#inner_height_m
+    marker: plan
+    from: research §0 (cup)
+    doc: Inner height H_c
+  # -- 1.1 bring-up read, 2.1 payload and TCP (the file e03pro.yaml is their home)
+  payload_kg:
+    stage: payload_tcp
+    type: f64
+    unit: kg
+    home: file:config/arm/e03pro.yaml#mounting.payload_kg
+    marker: measured
+    from: codebase §3.8 item 8
+    doc: What the pendant must show; weighed holder + cup + water once the holder is on
+  tcp_name:
+    stage: payload_tcp
+    type: str
+    unit: "-"
+    home: file:config/arm/e03pro.yaml#mounting.tcp_name
+    marker: owner
+    from: codebase §3.8 item 8
+    doc: TCP on the bare flange, then CUPRIM taught on the pendant
+  # -- 1.6 arm control (jog and points); the tool also refuses anything above confirmed.yaml
+  jog_speed_mm_s:
+    stage: arm_control
+    type: f64
+    unit: mm/s
+    range: [1.0, 100.0]
+    default: 10.0
+    marker: proposal
+    from: none; half of the confirmed 20 mm/s
+    doc: Linear speed of every jog and point move
+  jog_acc_mm_s2:
+    stage: arm_control
+    type: f64
+    unit: mm/s^2
+    range: [10.0, 500.0]
+    default: 50.0
+    marker: proposal
+    from: none; half of the confirmed 100 mm/s^2 (about 0.2 mm of surface tilt at the wall, computed)
+    doc: Linear acceleration of every jog and point move
+  jog_max_step_mm:
+    stage: arm_control
+    type: f64
+    unit: mm
+    range: [1.0, 100.0]
+    default: 50.0
+    marker: proposal
+    from: none
+    doc: Largest single jog step
+  jog_box_mm:
+    stage: arm_control
+    type: f64_list
+    unit: mm
+    range: [0.0, 600.0]
+    default: [200.0, 200.0, 150.0]
+    marker: proposal
+    from: none; the safe workspace is not in the Elfin files [MISSING]
+    doc: No move goes further than this in X, Y, Z from where the session enabled the arm
+  jog_idle_timeout_s:
+    stage: arm_control
+    type: f64
+    unit: s
+    range: [5.0, 3600.0]
+    default: 300.0
+    marker: proposal
+    from: owner request (an Arm control session must not keep the arm enabled unattended)
+    doc: With no command for this long the session ends and the arm is disabled; the page warns in the last minute
+  path_dwell_s:
+    stage: arm_control
+    type: f64
+    unit: s
+    range: [0.0, 30.0]
+    default: 2.0
+    marker: proposal
+    from: none
+    doc: Pause at each point of a path run, so the water settles
+  # -- 1.2 state stream
+  state_gap_mean_ms_range:
+    stage: state_stream
+    type: f64_list
+    unit: ms
+    range: [10.0, 200.0]
+    default: [45.0, 55.0]
+    marker: proposal
+    from: elfin_commands.md, PROTO p.7 (Datasheet at 20 Hz)
+    doc: Accepted mean interval between Datasheet packets
+  state_gap_max_ms:
+    stage: state_stream
+    type: f64
+    unit: ms
+    range: [50.0, 2000.0]
+    default: 150.0
+    marker: proposal
+    from: none
+    doc: Longest accepted interval between Datasheet packets
+  # -- 1.4 servo ladder (code constants and the owner's file)
+  servo_period_s:
+    stage: servo_ladder
+    type: f64
+    unit: s
+    home: file:config/arm/confirmed.yaml#servo_period_s
+    marker: owner
+    from: codebase §3.8 item 5
+    doc: The confirmed servo period; only the owner changes it
+  ladder_late_limit:
+    stage: servo_ladder
+    type: f64
+    unit: "1"
+    home: code:tools.elfin_py.servo_ladder#LATE_LIMIT
+    marker: owner
+    from: research §9 week 1
+    doc: More than this fraction of late pushes stops the ladder
+  ladder_guard_other_joints_deg:
+    stage: servo_ladder
+    type: f64
+    unit: deg
+    home: code:tools.elfin_py.servo_ladder#GUARD_OTHER_JOINTS_DEG
+    marker: proposal
+    from: open question Q6
+    doc: Any joint other than J6 further than this from q0 decelerates the stream
+  ladder_guard_j6_margin_deg:
+    stage: servo_ladder
+    type: f64
+    unit: deg
+    home: code:tools.elfin_py.servo_ladder#GUARD_J6_MARGIN_DEG
+    marker: proposal
+    from: open question Q6
+    doc: J6 outside q0 +- (amplitude + this) decelerates the stream
+  ladder_state_stale_s:
+    stage: servo_ladder
+    type: f64
+    unit: s
+    home: code:tools.elfin_py.servo_ladder#STATE_STALE_S
+    marker: proposal
+    from: open question Q6
+    doc: No Datasheet packet for this long decelerates the stream
+  # -- 3.1 intrinsics
+  exposure_s:
+    stage: intrinsics
+    type: f64
+    unit: s
+    home: file:config/camera.yaml#camera.exposure_s
+    marker: target
+    from: research §1 (t_exp <= 1 ms)
+    doc: Exposure time
+  gain_db:
+    stage: intrinsics
+    type: f64
+    unit: dB
+    home: file:config/camera.yaml#camera.gain_db
+    marker: MISSING
+    from: research §0 (camera)
+    doc: Sensor gain, 0-17 dB on this camera
+  frame_rate_hz:
+    stage: intrinsics
+    type: f64
+    unit: Hz
+    home: file:config/camera.yaml#camera.frame_rate_hz
+    marker: target
+    from: research §1
+    doc: Working frame rate
+  charuco_square_mm:
+    stage: intrinsics
+    type: f64
+    unit: mm
+    range: [5.0, 20.0]
+    default: 10.0
+    marker: unverified
+    from: research §3.1 (measure with calipers)
+    doc: ChArUco square size as measured
+  charuco_images:
+    stage: intrinsics
+    type: int
+    unit: "1"
+    range: [10, 200]
+    default: 40
+    marker: target
+    from: research §3.1 (30-50 images)
+    doc: Calibration images to take
+  reproj_rms_max_px:
+    stage: intrinsics
+    type: f64
+    unit: px
+    range: [0.05, 2.0]
+    default: 0.3
+    marker: target
+    from: research §3.1, §7.1 gate item 3
+    doc: Largest accepted RMS reprojection error on held-out images
+  # -- 3.2 cup pose and ray table
+  n_sectors:
+    stage: cup_pose
+    type: int
+    unit: "1"
+    range: [8, 64]
+    default: 32
+    marker: target
+    from: research §1 (N_sec)
+    doc: Rays round the wall
+  ray_half_window_px:
+    stage: cup_pose
+    type: int
+    unit: px
+    range: [16, 256]
+    default: 64
+    marker: proposal
+    from: research §2.3; docs/design/cnn_fallback.md §2
+    doc: Samples either side of the expected radius along each ray
+  rim_residual_max_px:
+    stage: cup_pose
+    type: f64
+    unit: px
+    range: [0.1, 2.0]
+    default: 0.5
+    marker: target
+    from: research R15; codebase §8
+    doc: Session check-image residual above which the session stops for recalibration
+  calibration_id:
+    stage: cup_pose
+    type: str
+    unit: "-"
+    default: null
+    marker: measured
+    from: codebase §8 (calibration records)
+    doc: The calibration record in use; set by accepting this stage
+  # -- 3.3 camera timing
+  timing_test_s:
+    stage: camera_timing
+    type: f64
+    unit: s
+    range: [10.0, 600.0]
+    default: 60.0
+    marker: target
+    from: research §7.1 kill test 2(c)
+    doc: Length of the timing recording
+  jitter_max_ms:
+    stage: camera_timing
+    type: f64
+    unit: ms
+    range: [0.01, 5.0]
+    default: 0.2
+    marker: target
+    from: research §7.1, gate item 4
+    doc: Largest accepted frame-interval jitter
+  tau_cam_max_ms:
+    stage: camera_timing
+    type: f64
+    unit: ms
+    range: [1.0, 50.0]
+    default: 10.0
+    marker: target
+    from: research §7.1, gate item 5
+    doc: Largest accepted exposure-to-host latency
+  dropped_frames_max:
+    stage: camera_timing
+    type: int
+    unit: "1"
+    range: [0, 1000]
+    default: 0
+    marker: target
+    from: research §7.1 kill test 2(c)
+    doc: Dropped frames allowed in the timing recording
+  # -- 4.2 meniscus map
+  meniscus_levels:
+    stage: meniscus_map
+    type: int
+    unit: "1"
+    range: [3, 10]
+    default: 5
+    marker: target
+    from: research §3.1 item 2 (3-5 weighed levels)
+    doc: Weighed fill levels recorded at rest
+  meniscus_map_id:
+    stage: meniscus_map
+    type: str
+    unit: "-"
+    default: null
+    marker: measured
+    from: research §3.1 item 2
+    doc: The meniscus and fill map in use; set by accepting this stage
+  # -- 4.3 front-end tuning
+  edge_method:
+    stage: frontend_tune
+    type: enum
+    values: [classical, cnn]
+    unit: "-"
+    default: classical
+    marker: owner
+    from: research §0 amendment, §2.3
+    doc: The edge step; cnn only after the gate memo says the classical detector failed
+  liquid:
+    stage: frontend_tune
+    type: enum
+    values: [clear, dyed]
+    unit: "-"
+    default: clear
+    marker: owner
+    from: research §0
+    doc: Clear water is the requirement; dyed is the reference and the last resort
+  lighting_setup:
+    stage: frontend_tune
+    type: str
+    unit: "-"
+    default: null
+    marker: MISSING
+    from: research §0 (lighting); open question Q5
+    doc: ID of the lighting set-up in use
+  edge_smoothing_px:
+    stage: frontend_tune
+    type: f64
+    unit: px
+    range: [0.0, 10.0]
+    default: 1.5
+    marker: proposal
+    from: research §2.3
+    doc: Smoothing of the profile before the derivative (classical)
+  c_min:
+    stage: frontend_tune
+    type: f64
+    unit: "1"
+    range: [0.5, 0.999]
+    default: 0.9
+    marker: proposal
+    from: research §2.3; open question Q4
+    doc: Rays below this confidence count as missing
+  n_valid_min:
+    stage: frontend_tune
+    type: int
+    unit: "1"
+    range: [6, 32]
+    default: 16
+    marker: proposal
+    from: research §2.3; open question Q4
+    doc: Fewer valid rays than this makes the measurement of the frame invalid
+  quadrant_min:
+    stage: frontend_tune
+    type: int
+    unit: "1"
+    range: [0, 8]
+    default: 2
+    marker: proposal
+    from: research §2.3; open question Q4
+    doc: Valid rays needed in every 90-degree quadrant
+  gate_sigma:
+    stage: frontend_tune
+    type: f64
+    unit: sigma
+    range: [2.0, 5.0]
+    default: 3.0
+    marker: plan
+    from: research §2.3 (gating at 3 sigma)
+    doc: Innovation gate
+  # -- 4.5 the kill-test-2 gate
+  gate_sigma_s_max_mm:
+    stage: camera_gate
+    type: f64
+    unit: mm
+    range: [0.005, 1.0]
+    default: 0.05
+    marker: target
+    from: research §7.1, gate item 1
+    doc: Per-frame noise on s
+  gate_track_min_crest_mm:
+    stage: camera_gate
+    type: f64
+    unit: mm
+    range: [0.1, 5.0]
+    default: 1.0
+    marker: target
+    from: research §7.1, gate item 2 (wording [UNCLEAR], Q2)
+    doc: Smallest crest the first harmonic must still track in clear water
+  gate_deadband_window_s_min:
+    stage: camera_gate
+    type: f64
+    unit: s
+    range: [0.3, 3.0]
+    default: 1.0
+    marker: proposal
+    from: research §7.1 gate item 6, §3.2; open question Q3
+    doc: Ring-down time above the dead band after the standard kick
+  # -- 5.1 per-pickup shake
+  kick_mm:
+    stage: pickup_shake
+    type: f64
+    unit: mm
+    range: [1.0, 10.0]
+    default: 4.0
+    marker: target
+    from: research §3.2 (3-5 mm)
+    doc: Lateral displacement of P in each kick
+  kick_s:
+    stage: pickup_shake
+    type: f64
+    unit: s
+    range: [0.05, 0.5]
+    default: 0.12
+    marker: target
+    from: research §3.2 (0.10-0.15 s)
+    doc: Duration of each kick (cosine ramp)
+  hold_s:
+    stage: pickup_shake
+    type: f64
+    unit: s
+    range: [0.5, 3.0]
+    default: 1.5
+    marker: target
+    from: research §3.2 (1.0-1.5 s)
+    doc: Ring-down hold after each kick
+  dispersion_mismatch_max:
+    stage: pickup_shake
+    type: f64
+    unit: "1"
+    range: [0.005, 0.2]
+    default: 0.03
+    marker: plan
+    from: research §3.2 (consistency row)
+    doc: Larger relative mismatch of omega0 vs the dispersion relation flags the trial
+  isotropy_max:
+    stage: pickup_shake
+    type: f64
+    unit: "1"
+    range: [0.001, 0.1]
+    default: 0.01
+    marker: plan
+    from: research §3.2 (kick y row)
+    doc: Largest relative difference of f0 between the x and y kicks
+  repeat_pickups:
+    stage: pickup_shake
+    type: int
+    unit: "1"
+    range: [5, 200]
+    default: 30
+    marker: plan
+    from: research §7.2
+    doc: Pickups for the repeatability statistics
+  f0_repeat_rel_max:
+    stage: pickup_shake
+    type: f64
+    unit: "1"
+    range: [0.001, 0.1]
+    default: 0.01
+    marker: plan
+    from: research §9 (MS1)
+    doc: Spread of f0 over repeat runs
+  zeta_repeat_rel_max:
+    stage: pickup_shake
+    type: f64
+    unit: "1"
+    range: [0.05, 1.0]
+    default: 0.30
+    marker: plan
+    from: research §9 (MS1)
+    doc: Spread of zeta over repeat runs
+  # -- 5.3 estimator
+  tick_hz:
+    stage: estimator_validation
+    type: f64
+    unit: Hz
+    range: [100.0, 2000.0]
+    default: 1000.0
+    marker: target
+    from: research §0, departure 4
+    doc: Estimator tick
+  history_ms:
+    stage: estimator_validation
+    type: f64
+    unit: ms
+    range: [20.0, 500.0]
+    default: 100.0
+    marker: target
+    from: research §4
+    doc: Delayed-measurement history
+  pred_corr_min:
+    stage: estimator_validation
+    type: f64
+    unit: "1"
+    range: [0.5, 1.0]
+    default: 0.9
+    marker: target
+    from: research §4, validation target 1
+    doc: Crest correlation of the prediction with later frames
+  pred_amp_err_max:
+    stage: estimator_validation
+    type: f64
+    unit: "1"
+    range: [0.01, 1.0]
+    default: 0.2
+    marker: target
+    from: research §4
+    doc: Relative amplitude error of the prediction
+  pred_phase_err_max_deg:
+    stage: estimator_validation
+    type: f64
+    unit: deg
+    range: [1.0, 90.0]
+    default: 20.0
+    marker: target
+    from: research §4
+    doc: Phase error of the prediction at the mode
+  nis_in_band_min:
+    stage: estimator_validation
+    type: f64
+    unit: "1"
+    range: [0.5, 1.0]
+    default: 0.9
+    marker: target
+    from: research §4, validation target 3
+    doc: Fraction of a trial with the NIS inside its 95 % band
+  # -- 6 trajectories
+  line_length_m:
+    stage: path_sizing
+    type: f64
+    unit: m
+    range: [0.05, 0.6]
+    default: 0.4
+    marker: plan
+    from: research §7.1 kill test 1 (may need shrinking)
+    doc: Line path length
+  circle_radii_m:
+    stage: path_sizing
+    type: f64_list
+    unit: m
+    range: [0.02, 0.3]
+    default: [0.10, 0.15, 0.20]
+    marker: plan
+    from: research §7.1 kill test 1
+    doc: Circle path radii
+  bottleneck_ratio:
+    stage: killtest1
+    type: f64
+    unit: "1"
+    range: [0.5, 1.0]
+    default: 0.95
+    marker: plan
+    from: research §7.1 kill test 1
+    doc: The first limit ratio to reach this is the bottleneck
+  speed_factors:
+    stage: killtest1
+    type: f64_list
+    unit: "1"
+    range: [0.01, 10.0]
+    default: []
+    marker: owner
+    from: research §7.1 (owner-confirmed steps)
+    doc: Speed factors confirmed by the owner, in order
+  # -- 7 safety and corrector
+  dropout_decel_s:
+    stage: rt_safety
+    type: f64
+    unit: s
+    range: [0.03, 5.0]
+    default: null
+    marker: MISSING
+    from: codebase §6 (decelerate after a longer dropout [target]; no value given)
+    doc: Frame dropout after which the safety monitor decelerates
+  rim_margin_mm:
+    stage: rt_safety
+    type: f64
+    unit: mm
+    range: [0.0, 40.0]
+    default: null
+    marker: MISSING
+    from: research §1 (safety monitor margin; no value given)
+    doc: Hold or decelerate when the crest + 3 sigma exceeds freeboard minus this
+  zeta_target:
+    stage: corrector
+    type: f64
+    unit: "1"
+    range: [0.2, 0.4]
+    default: 0.3
+    marker: plan
+    from: research §5.1
+    doc: Added damping
+  k_p:
+    stage: corrector
+    type: f64
+    unit: 1/s^2
+    range: [0.0, 100.0]
+    default: 0.0
+    marker: plan
+    from: research §5.1 (k_p about 0)
+    doc: Position gain of the correction
+  delta_a_cap_m_s2:
+    stage: corrector
+    type: f64
+    unit: m/s^2
+    range: [0.0, 2.0]
+    default: 2.0
+    marker: target
+    from: research §5.1 item 4 (re-check against the E03-Pro limits)
+    doc: Authority cap on the correction
+  joint_acc_fraction_max:
+    stage: corrector
+    type: f64
+    unit: "1"
+    range: [0.1, 0.8]
+    default: 0.8
+    marker: plan
+    from: research §5.1 item 4
+    doc: Joint-acceleration references above this fraction of the limits scale the correction down
+  band_low_rel:
+    stage: corrector
+    type: f64
+    unit: "1"
+    range: [0.1, 1.0]
+    default: 0.5
+    marker: plan
+    from: research §5.1 item 5 (0.5-2 omega0)
+    doc: Lower edge of the band of the correction, in units of omega0
+  band_high_rel:
+    stage: corrector
+    type: f64
+    unit: "1"
+    range: [1.0, 5.0]
+    default: 2.0
+    marker: plan
+    from: research §5.1 item 5
+    doc: Upper edge of the band of the correction, in units of omega0
+  dropout_disable_s:
+    stage: corrector
+    type: f64
+    unit: s
+    range: [0.0, 0.5]
+    default: 0.03
+    marker: plan
+    from: research §5.1 item 5
+    doc: The correction stays off this long after a dropout or a rejected frame
+  # -- 7.2 NMPC (step 2)
+  nmpc_horizon_s:
+    stage: nmpc
+    type: f64
+    unit: s
+    range: [1.5, 2.0]
+    default: 1.5
+    marker: plan
+    from: research §5.2
+    doc: Horizon
+  nmpc_nodes:
+    stage: nmpc
+    type: int
+    unit: "1"
+    range: [50, 100]
+    default: 75
+    marker: plan
+    from: research §5.2
+    doc: Shooting nodes
+  nmpc_tube_mm:
+    stage: nmpc
+    type: f64
+    unit: mm
+    range: [1.0, 20.0]
+    default: 5.0
+    marker: plan
+    from: research §5.2
+    doc: Path tube half-width
+  nmpc_limit_fraction:
+    stage: nmpc
+    type: f64
+    unit: "1"
+    range: [0.5, 0.9]
+    default: 0.9
+    marker: plan
+    from: research §5.2
+    doc: Joint limits used, as a fraction of the read values
+  nmpc_solve_budget_ms:
+    stage: nmpc
+    type: f64
+    unit: ms
+    range: [1.0, 50.0]
+    default: 10.0
+    marker: unverified
+    from: research §5.2
+    doc: Solve-time budget at 50 Hz
+  # -- 8 comparison
+  trials_per_cell:
+    stage: freeze
+    type: int
+    unit: "1"
+    range: [3, 20]
+    default: 5
+    marker: plan
+    from: research §7.2
+    doc: Trials per (path, speed factor, method) cell
+  spill_outcome_definition:
+    stage: freeze
+    type: str
+    unit: "-"
+    default: null
+    marker: MISSING
+    from: open question Q7
+    doc: What "equal spill outcome" means, fixed before the evaluation
+  randomization_seed:
+    stage: freeze
+    type: int
+    unit: "1"
+    range: [0, 2147483647]
+    default: null
+    marker: measured
+    from: codebase §8 (record.py randomization)
+    doc: Seed of the block randomization, set when the evaluation is frozen

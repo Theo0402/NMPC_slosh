@@ -1,0 +1,991 @@
+# The stages of the hardware phase, from a finished bench to the with-vs-without comparison
+# (codebase plan §12). The workbench reads this file; docs/stages.md is generated from it with
+#     python -m tools.workbench.gen_docs
+# Readable by tools/yamlmini.py (block style, no flow mappings, no multi-line strings).
+#
+# Per stage:
+#   num, group, title, purpose, plan    what it is and where the plans define it
+#   modes        dry-run | mock | arm (a tool that talks to the arm) | form (a checklist on the page)
+#                | analysis (a script on recorded data, on this machine)
+#   status       built | planned (the tool does not exist yet) | conditional (only if a gate says so)
+#   tool         python module run as `python -m <tool> --<mode>`, or "form", or the planned path
+#   requires     stages that must have passed (on the arm, for tool stages) before an arm run
+#   inputs       what the stage needs; adjust: coefficients the owner may change (params.schema.yaml)
+#   files        config the inputs hash covers (path or path#key.path); a change makes results stale
+#   criteria     id -> text, kind (auto: a metric checked against a value or a coefficient;
+#                operator: ticked on the page), metric, op, value | coeff
+#   output       what an accepted run leaves behind
+#   gate         true for the host check and the per-session checklists: they lock what follows,
+#                but their new results and coefficients make nothing downstream stale
+schema: 1
+groups:
+  g0: Pre-flight and safety
+  g1: Robot connection
+  g2: Arm calibration
+  g3: Camera calibration
+  g4: Cup and liquid calibration, and the camera gate
+  g5: Slosh checking and identification
+  g6: Trajectory planning
+  g7: Controller
+  g8: With vs without comparison
+  g9: Analysis and records
+stages:
+  host_check:
+    num: "0.1"
+    gate: true
+    group: g0
+    title: Linux machine ready
+    purpose: Check the machine that will run the arm tools and the RT process before a session (added stage)
+    plan: codebase §2 (where the code runs), §6 (threads), §8 (disks); research §0 (compute)
+    modes: [analysis]
+    status: built
+    tool: tools.host_check
+    requires: []
+    inputs:
+      - The Linux machine, with the repo and Python 3.12
+    adjust: [data_free_gb_min]
+    criteria:
+      linux:
+        text: Linux, not WSL, so that arm runs are allowed (link.arm_host_problem)
+        kind: auto
+        metric: arm_host_ok
+        op: is_true
+      monotonic:
+        text: Monotonic clock resolution of 1 microsecond or better
+        kind: auto
+        metric: monotonic_resolution_s
+        op: le
+        value: 0.000001
+      disk:
+        text: Free space under data/ at least data_free_gb_min
+        kind: auto
+        metric: data_free_gb
+        op: ge
+        coeff: data_free_gb_min
+      rt_kernel:
+        text: PREEMPT_RT kernel and isolated cores, as decided in week 1 (codebase §6) [unverified]
+        kind: operator
+      backup_target:
+        text: The backup disk is mounted (codebase §8)
+        kind: operator
+    output: data/workbench/results/host_check/
+  preflight:
+    num: "0.2"
+    group: g0
+    title: Pre-flight and safety (every session)
+    purpose: The bench is safe and recorded before anything moves; repeated every session
+    plan: codebase §3.8 items 2, 6, 8; research §0 (holder, cup, lighting), §3.1 item 3, R6, R15
+    modes: [form]
+    status: built
+    tool: form
+    per_session: true
+    requires: [host_check]
+    inputs:
+      - Arm powered from the pendant, e-stop within reach, scale, thermometer [MISSING H6]
+    adjust: [nominal_fills, water_temp_range_c]
+    fields:
+      estop_test:
+        label: "E-stop test, arm still: pressing it cuts the arm's 48 V (elfin_overview.md, PROTO p.60); ReadRobotState shows nEmergencyStop = 1 (PROTO p.61-62); after the reset (turn the button, LINUX p.11) the arm is unpowered and is powered on again from the pendant (LINUX p.122)"
+        type: check
+      workspace_clear:
+        label: "Workspace clear; nothing in the arm's reach except the cup holder"
+        type: check
+      tray_shield:
+        label: Drip tray under the path and the drip shield over the lens fitted (R6)
+        type: check
+      cables:
+        label: Camera and arm cables routed and strain-relieved for the full path
+        type: check
+      holder_bolts:
+        label: Holder flange bolts (ISO 9409-1-50-4-M6) and cup clamp checked
+        type: check
+      lighting_fixed:
+        label: Lighting fixed and recorded (set-up ID below)
+        type: check
+      lighting_setup:
+        label: Lighting set-up ID
+        type: text
+      payload_g:
+        label: Payload weighed (holder + cup + water), g
+        type: number
+      fill_height_mm:
+        label: Fill height you measured, mm (the flat surface, not the meniscus at the wall)
+        type: number
+      water_temp_c:
+        label: Water temperature, degC
+        type: number
+    criteria:
+      temp_ok:
+        text: Water temperature inside water_temp_range_c
+        kind: auto
+        metric: water_temp_c
+        op: in_range
+        coeff: water_temp_range_c
+    output: data/workbench/results/preflight/ (one per session); journal line
+  bringup_read:
+    num: "1.1"
+    group: g1
+    title: "Bring-up read: identity, limits, frames"
+    purpose: Read the model string, the limits and the current frames; paste the limits into e03pro.yaml; read again to check
+    plan: codebase §3.8 item 8, §11 week 1; research §9 week 1; elfin_examples.md example 1
+    modes: [dry-run, mock, arm]
+    status: built
+    tool: tools.elfin_py.bringup_read
+    options:
+      controller_version:
+        flag: "--controller-version"
+        label: "Controller version as the pendant's About screen shows it (LINUX p.19)"
+    requires: [preflight]
+    files: ["config/arm/e03pro.yaml#limits_readback", "config/arm/e03pro.yaml#mounting"]
+    inputs:
+      - "Arm powered (nElectrify = 1); the tool never enables"
+      - e03pro.yaml address; joint ranges from the pendant (LINUX p.50) entered by the owner
+    adjust: []
+    criteria:
+      ran:
+        text: Every read answered, no problems listed (limits and frames match e03pro.yaml)
+        kind: auto
+        metric: problems
+        op: eq
+        value: 0
+      limits:
+        text: All four limit reads present (ReadJointMaxVel/Acc/Jerk, ReadLinearMaxVel; PROTO p.56-59)
+        kind: auto
+        metric: limits_read
+        op: is_true
+      recorded:
+        text: "e03pro.yaml limits_readback has this arm's values and record ID (pasted, then read again)"
+        kind: auto
+        metric: limits_in_config
+        op: is_true
+      ranges:
+        text: Joint ranges entered in e03pro.yaml from the pendant (sources disagree, elfin_overview.md)
+        kind: operator
+    output: limits block for e03pro.yaml; trial .bin (scratch)
+  state_stream:
+    num: "1.2"
+    group: g1
+    title: State stream
+    purpose: Rate, format and keys of the Datasheet on port 10004; are e-stop and light-curtain keys present
+    plan: codebase §3.8 item 7; elfin_commands.md PROTO p.7, p.185-188; example 4
+    modes: [dry-run, mock, arm]
+    status: built
+    tool: tools.elfin_py.state_stream
+    requires: [bringup_read]
+    files: ["config/arm/e03pro.yaml#address"]
+    inputs:
+      - Port 10004 reachable
+    adjust: [state_gap_mean_ms_range, state_gap_max_ms]
+    criteria:
+      packets:
+        text: Packets received and no stream error
+        kind: auto
+        metric: stream_ok
+        op: is_true
+      rate:
+        text: Mean packet interval inside state_gap_mean_ms_range (20 Hz, PROTO p.7)
+        kind: auto
+        metric: gap_mean_ms
+        op: in_range
+        coeff: state_gap_mean_ms_range
+      gaps:
+        text: Longest interval at most state_gap_max_ms
+        kind: auto
+        metric: gap_max_ms
+        op: le
+        coeff: state_gap_max_ms
+      safety_keys:
+        text: "Recorded which safety keys the packets carry (none means the ladder must test ReadRobotState between pushes, §3.8 item 7)"
+        kind: operator
+    output: trial .bin with state_raw and robot_state
+  move_test:
+    num: "1.3"
+    group: g1
+    title: First enable and move
+    purpose: "Enable, J6 +10 deg, flange 20 mm up, and back; tests whether '20.0000' is accepted [UNTESTED]"
+    plan: codebase §1 R-B, §3.8 items 2-5, 8; elfin_examples.md example 2
+    modes: [dry-run, mock, arm]
+    status: built
+    tool: tools.elfin_py.move_test
+    args: ["--return"]
+    requires: [bringup_read, state_stream]
+    files: ["config/arm/confirmed.yaml", "config/arm/e03pro.yaml#mounting", "config/arm/e03pro.yaml#limits_readback", "config/arm/e03pro.yaml#joint_ranges_deg"]
+    inputs:
+      - Limits recorded (1.1), payload and TCP confirmed on the pendant at the prompt
+    adjust: []
+    criteria:
+      done:
+        text: Both moves and the return done, no Fail, GrpDisable on exit
+        kind: auto
+        metric: completed
+        op: is_true
+      format:
+        text: The controller accepted 4-decimal numbers in WayPoint (else add a FORMAT_OVERRIDES entry)
+        kind: auto
+        metric: format_accepted
+        op: is_true
+      watched:
+        text: "Watched: brakes released with sound and slight movement only (LINUX p.17-18); moves as planned"
+        kind: operator
+    output: trial .bin (scratch)
+  servo_ladder:
+    num: "1.4"
+    group: g1
+    title: Servo ladder (one period per run)
+    purpose: "Stream a slow J6 sine at the period in confirmed.yaml; the owner lowers the period between runs"
+    plan: codebase §3.8 items 5-7 and the first-run table; research §9 week 1; elfin_commands.md PROTO p.172-175
+    modes: [dry-run, mock, arm]
+    status: built
+    tool: tools.elfin_py.servo_ladder
+    requires: [move_test]
+    files: ["config/arm/confirmed.yaml", "config/arm/e03pro.yaml#servo_in_use", "config/arm/e03pro.yaml#mounting"]
+    inputs:
+      - "confirmed.yaml servo_period_s (0.2 -> 0.1 -> 0.05 -> 0.04 -> 0.03 -> 0.02 -> 0.015 -> 0.01 s), lookahead 0.02 s"
+    adjust: [servo_period_s, ladder_late_limit, ladder_guard_other_joints_deg, ladder_guard_j6_margin_deg, ladder_state_stale_s]
+    criteria:
+      verdict:
+        text: "No stop rule fired: no Fail, <= 1 % late, median reply <= T_s/2, J6 tracks, no roughness"
+        kind: auto
+        metric: verdict_ok
+        op: is_true
+      after:
+        text: Recorded what the arm did when pushes stopped and what GrpStop did [UNTESTED]
+        kind: operator
+    output: trial .bin (killtest) and .summary.json; the owner then confirms the next period in confirmed.yaml
+  pose_record:
+    num: "1.5"
+    group: g1
+    title: Pose recording for the FK check
+    purpose: About 20 ReadActPos poses on the bare flange with zero TCP and user frame
+    plan: research §0 (kinematic model), §9 week 1; codebase §9 (FK row)
+    modes: [dry-run, mock, arm]
+    status: built
+    tool: tools.elfin_py.pose_recorder
+    requires: [move_test]
+    files: ["config/arm/fk_poses.yaml", "config/arm/confirmed.yaml", "config/arm/e03pro.yaml#mounting", "config/arm/e03pro.yaml#joint_ranges_deg"]
+    inputs:
+      - "The owner's poses in config/arm/fk_poses.yaml, including single-joint moves"
+    adjust: []
+    criteria:
+      all:
+        text: Every pose in fk_poses.yaml recorded
+        kind: auto
+        metric: all_poses
+        op: is_true
+    output: trial .bin with the poses (scratch)
+  arm_control:
+    num: "1.6"
+    group: g1
+    title: Arm control (jog, start, middle and end points)
+    purpose: Move the arm slowly with buttons, with the cup upright, and record and run start, middle and end points
+    plan: codebase §3.8 items 1-5, 8; elfin_commands.md WayPoint (PROTO p.137-139), GrpStop (p.20), ReadActPos (p.66-67)
+    modes: [dry-run, mock, arm]
+    status: built
+    tool: tools.elfin_py.jog
+    requires: [move_test]
+    files: ["config/arm/confirmed.yaml", "config/arm/e03pro.yaml#mounting"]
+    inputs:
+      - "The Arm control tab; linear moves only, orientation held, at jog_speed_mm_s and jog_acc_mm_s2 (never above confirmed.yaml)"
+    adjust: [jog_speed_mm_s, jog_acc_mm_s2, jog_max_step_mm, jog_box_mm, path_dwell_s, jog_idle_timeout_s]
+    criteria:
+      ended:
+        text: The session ended normally (exit code 0)
+        kind: auto
+        metric: exit_ok
+        op: is_true
+      no_fail:
+        text: No reply from the controller was a Fail
+        kind: auto
+        metric: fail_replies
+        op: eq
+        value: 0
+      no_refusal:
+        text: No command was refused (jog box, step size, orientation, frames)
+        kind: auto
+        metric: refusal_count
+        op: eq
+        value: 0
+      disabled:
+        text: GrpDisable was answered OK on exit
+        kind: auto
+        metric: grpdisable_ok
+        op: is_true
+    output: trial .bin (scratch); points in data/workbench/points/
+  payload_tcp:
+    num: "2.1"
+    group: g2
+    title: Payload and TCP CUPRIM
+    purpose: With the holder on, set payload and TCP on the pendant, update e03pro.yaml, and check them with a bring-up read
+    plan: codebase §3.8 item 8; research §3.1 item 3
+    modes: [form]
+    status: built
+    tool: form
+    requires: [bringup_read]
+    files: ["config/arm/e03pro.yaml#mounting"]
+    inputs:
+      - Weighed holder + cup + water; centre of mass from CAD; the flange axes from the jog test [MISSING F3]
+    adjust: [payload_kg, tcp_name]
+    fields:
+      jog_axes:
+        label: Flange-frame axis directions found by jogging each tool axis at the slowest jog speed (research §3.1)
+        type: check
+      pendant_payload:
+        label: Pendant payload = weighed mass, centre of mass converted into the flange frame (SetPayload units kg, mm; PROTO p.48)
+        type: check
+      cuprim:
+        label: TCP CUPRIM taught at the cup axis, rim height; e03pro.yaml mounting updated to match
+        type: check
+    criteria:
+      readback:
+        text: Bring-up read (1.1) re-run with this mounting and accepted on the arm (frames match the config)
+        kind: auto
+        metric: bringup_fresh
+        op: is_true
+    output: e03pro.yaml mounting (edited by the owner); form record
+  fk_check:
+    num: "2.2"
+    group: g2
+    title: FK check against ReadActPos
+    purpose: Our FK against the recorded poses; positions first, then orientations once the Rx, Ry, Rz convention is known
+    plan: codebase §9 (FK row), §11 week 2; research §0 (kinematic model)
+    modes: [analysis]
+    status: planned
+    tool: analysis/fk_check.py (needs the E03-Pro kinematic model [MISSING F1])
+    requires: [pose_record]
+    inputs:
+      - Accepted pose recording (1.5); the kinematic model
+    adjust: []
+    criteria:
+      positions:
+        text: "Position error per pose within the memo's tolerance [MISSING tolerance]"
+        kind: operator
+    output: docs/memos/fk-check.md
+  actuation_delay:
+    num: "2.3"
+    group: g2
+    title: Actuation delay and servo response
+    purpose: Camera on a static table target, chirp on one wrist joint; tau_a, lag model, lookahead effect
+    plan: research §4 item 3; codebase §11 week 2 (tools/latency_chirp)
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: tools/latency_chirp (planned)
+    requires: [servo_ladder, camera_timing]
+    inputs:
+      - Static target [MISSING H5]; confirmed period
+    adjust: []
+    criteria:
+      record:
+        text: tau_a record written with its fit residual
+        kind: operator
+    output: data/latency/<id>/ (tau_a and the servo-response fit)
+  gamma_model:
+    num: "2.4"
+    group: g2
+    title: Commanded-gamma and tracking-error model
+    purpose: The error between commanded and actual effective gravity (R13), for the d state of the estimator
+    plan: research §2.1, §4, R13
+    modes: [analysis]
+    status: planned
+    tool: analysis/identify (planned)
+    requires: [actuation_delay, fk_check]
+    inputs:
+      - tau_a record; FK
+    adjust: []
+    criteria:
+      residual:
+        text: Servo-model residual documented; process noise on d sized from it
+        kind: operator
+    output: data/latency/<id>/servo_model
+  intrinsics:
+    num: "3.1"
+    group: g3
+    title: Camera intrinsics, focus, exposure, gain
+    purpose: ChArUco calibration; fisheye vs rational model on held-out images; focus and iris locked
+    plan: research §3.1 item 1, §7.1 kill test 2(b); codebase §11 week 3 (tools/calib)
+    modes: [analysis]
+    status: planned
+    tool: tools/calib (planned; camera library [MISSING F11])
+    requires: [host_check]
+    inputs:
+      - ChArUco board [MISSING H3]; shim [MISSING H8]
+    adjust: [exposure_s, gain_db, frame_rate_hz, charuco_square_mm, charuco_images, reproj_rms_max_px]
+    criteria:
+      rms:
+        text: RMS reprojection error on held-out images at most reproj_rms_max_px
+        kind: auto
+        metric: reproj_rms_px
+        op: le
+        coeff: reproj_rms_max_px
+    output: data/calib/<id>/ (model, held-out error)
+  cup_pose:
+    num: "3.2"
+    group: g3
+    title: Cup pose, ray table and masks
+    purpose: T_KC from the rim target; the ray table; the rim-tab mask
+    plan: research §2.3, §3.1 item 1
+    modes: [analysis]
+    status: planned
+    tool: tools/calib (planned)
+    requires: [intrinsics]
+    inputs:
+      - Rim target [MISSING H4]; cup wall thickness [MISSING F12]
+    adjust: [n_sectors, ray_half_window_px, rim_residual_max_px, calibration_id]
+    criteria:
+      rim:
+        text: Rim-registration residual at most rim_residual_max_px
+        kind: auto
+        metric: rim_residual_px
+        op: le
+        coeff: rim_residual_max_px
+    output: data/calib/<id>/ (T_KC, ray table, masks); calibration_id
+  camera_timing:
+    num: "3.3"
+    group: g3
+    title: Camera timing (kill test 2(c))
+    purpose: Frame-interval jitter, dropped frames, tau_cam by the LED test, image-stage time
+    plan: research §7.1 kill test 2(c); codebase §5 (LED and trigger), §9
+    modes: [analysis]
+    status: planned
+    tool: tools/cam_bench and tools/led_latency (planned)
+    requires: [host_check]
+    inputs:
+      - LED and its driver [MISSING H1]; trigger device if triggered [MISSING H2]
+    adjust: [timing_test_s, jitter_max_ms, tau_cam_max_ms, dropped_frames_max]
+    criteria:
+      jitter:
+        text: Jitter at most jitter_max_ms
+        kind: auto
+        metric: jitter_ms
+        op: le
+        coeff: jitter_max_ms
+      tau:
+        text: tau_cam at most tau_cam_max_ms
+        kind: auto
+        metric: tau_cam_ms
+        op: le
+        coeff: tau_cam_max_ms
+      drops:
+        text: Dropped frames at most dropped_frames_max
+        kind: auto
+        metric: dropped_frames
+        op: le
+        coeff: dropped_frames_max
+    output: data/latency/<id>/ (tau_cam, latch event)
+  clock_align:
+    num: "3.4"
+    group: g3
+    title: Clock alignment, camera and arm
+    purpose: Camera clock to host (offset and drift), checked by the LED; arm state stream on the same host clock
+    plan: research §4 (latency offsets 1); codebase §5 (two timestamps), §9 (clock fit)
+    modes: [analysis]
+    status: planned
+    tool: tools/clock_sync (planned)
+    requires: [camera_timing, state_stream]
+    inputs:
+      - LED events in sync records
+    adjust: []
+    criteria:
+      fit:
+        text: Clock-fit residual against the LED documented
+        kind: operator
+    output: data/latency/<id>/ (clock check)
+  latency_memo:
+    num: "3.5"
+    group: g3
+    title: Latency memo (week-1 deliverable)
+    purpose: Confirmed T_s, push reply times and tau_cam in one memo
+    plan: codebase §11 week 1 (done criterion), §3.7 P3
+    modes: [form]
+    status: built
+    tool: form
+    requires: [servo_ladder, camera_timing]
+    inputs:
+      - Accepted ladder results; camera timing
+    adjust: []
+    fields:
+      memo:
+        label: docs/memos/latency.md written (what was measured, what was decided, what would reverse it)
+        type: check
+    criteria:
+    output: docs/memos/latency.md
+  meniscus_map:
+    num: "4.1"
+    group: g4
+    title: Meniscus offset and fill map
+    purpose: 3-5 levels at rest, each measured by the owner; camera fill estimate against the measured height
+    plan: research §3.1 item 2
+    modes: [analysis]
+    status: planned
+    tool: analysis (planned; needs 3.2)
+    requires: [cup_pose]
+    adjust: [meniscus_levels, meniscus_map_id]
+    inputs:
+      - Calibration record; fill heights measured by the owner, clear and dyed (dyed gives the offset for CNN labels, docs/design/cnn_fallback.md)
+    criteria:
+      h:
+        text: Camera fill estimate within fill_tolerance_mm of the measured height
+        kind: auto
+        metric: fill_error_mm
+        op: abs_le
+        coeff: fill_tolerance_mm
+    output: meniscus map in the calibration record; meniscus_map_id
+  frontend_tune:
+    num: "4.2"
+    group: g4
+    title: Contact-line front-end tuning
+    purpose: Window, smoothing and thresholds per lighting set-up, on dyed water first, then clear
+    plan: research §2.3, §9 week 3
+    modes: [analysis]
+    status: planned
+    tool: rt/core/frontend/camera via the replay driver (planned)
+    requires: [meniscus_map]
+    adjust: [edge_method, liquid, lighting_setup, edge_smoothing_px, c_min, n_valid_min, quadrant_min, gate_sigma]
+    inputs:
+      - Stored images of static scenes and ring-downs
+    criteria:
+      bias:
+        text: Sub-pixel bias on synthetic images below 0.05 px [target] (codebase §9)
+        kind: operator
+    output: front-end settings (coefficient version)
+  static_ringdowns:
+    num: "4.3"
+    group: g4
+    title: Static ring-downs (kill test 2(a)); moved here from stage 5 because the gate needs them
+    purpose: Kicks giving about 0.5-10 mm crest; 40/60/80 %; clear and dyed; every lighting set-up
+    plan: research §7.1 kill test 2(a)
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: shake trial (planned) + analysis/identify/ringdown.py (built)
+    requires: [frontend_tune, servo_ladder]
+    adjust: [kick_mm, kick_s, hold_s]
+    inputs:
+      - Confirmed period and speeds; lighting set-ups [MISSING Q5]
+    criteria:
+      table:
+        text: Per-frame noise and dead-band table written for every set-up
+        kind: operator
+    output: per-set-up noise, bias, dead band, meniscus offset
+  camera_gate:
+    num: "4.4"
+    group: g4
+    title: The kill-test-2 gate (Part 1)
+    purpose: "The front-end in clear water, at least one lighting set-up; six numbers; pass, or the next step: classical first, the CNN after 4.5 (gate memo v2)"
+    plan: research §7.1 (gate), §2.3, §0 amendment, §8 (R1)
+    modes: [analysis]
+    status: built
+    tool: analysis.gate_memo
+    requires: [static_ringdowns, intrinsics, camera_timing]
+    files: ["data/workbench/gate_input.json"]
+    adjust: [gate_sigma_s_max_mm, gate_track_min_crest_mm, gate_deadband_window_s_min]
+    inputs:
+      - "data/workbench/gate_input.json: per set-up numbers from 3.1, 3.3 and 4.3; front_end; for a failed item 6, deadband_cause (pinning or edge_step, the owner's call from the ring-down plots)"
+    criteria:
+      passed:
+        text: At least one clear-water set-up passes all six (else the memo names the next step; the CNN only for edge-step failures)
+        kind: auto
+        metric: any_setup_passes
+        op: is_true
+      front_end:
+        text: The front-end whose numbers these are has passed its own stage (the CNN only after stage 4.5)
+        kind: auto
+        metric: front_end_accepted
+        op: is_true
+    output: docs/memos/camera-gate.md
+  cnn_frontend:
+    num: "4.5"
+    group: g4
+    title: CNN front-end (only if the gate fails)
+    purpose: "Only after the gate memo says the CNN fallback applies: labels, training, C++ inference, parity, acceptance on held-out sessions and lighting; then 4.4 again with its numbers (gate memo v2)"
+    plan: docs/design/cnn_fallback.md; research §0 amendment, §2.3, §7.1, R16
+    modes: [analysis]
+    status: conditional
+    tool: analysis/cnn and tools/label (not built until the gate memo says fail)
+    requires: [static_ringdowns, intrinsics, camera_timing]
+    adjust: [edge_method, c_min, n_valid_min, quadrant_min]
+    inputs:
+      - Gate memo saying fail; labels
+    criteria:
+      gate:
+        text: The six gate numbers on held-out data, calibration, R0-R2 refitted, dyed comparison
+        kind: operator
+    output: data/cnn/models/<id>/ and gate memo v2
+  pickup_shake:
+    num: "5.1"
+    group: g5
+    title: Per-pickup shake and identification
+    purpose: "About 3 s shake: f0 and zeta from the ring-down, dispersion check, isotropy, repeatability over >= 30 pickups"
+    plan: research §3.2; codebase §11 (where identification runs)
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: shake trial (planned) + analysis/identify/ringdown.py (built)
+    requires: [camera_gate, servo_ladder]
+    adjust: [kick_mm, kick_s, hold_s, dispersion_mismatch_max, isotropy_max, repeat_pickups, f0_repeat_rel_max, zeta_repeat_rel_max]
+    inputs:
+      - Front-end that passed the gate
+    criteria:
+      dispersion:
+        text: omega0 within dispersion_mismatch_max of the dispersion relation at the measured h
+        kind: auto
+        metric: dispersion_mismatch
+        op: abs_le
+        coeff: dispersion_mismatch_max
+      repeat_f0:
+        text: f0 spread over repeats at most f0_repeat_rel_max
+        kind: auto
+        metric: f0_rel_spread
+        op: le
+        coeff: f0_repeat_rel_max
+      repeat_zeta:
+        text: zeta spread over repeats at most zeta_repeat_rel_max
+        kind: auto
+        metric: zeta_rel_spread
+        op: le
+        coeff: zeta_repeat_rel_max
+    output: data/params/<id>.yaml per pickup
+  moving_kicks:
+    num: "5.2"
+    group: g5
+    title: Moving kicks (kill test 2(d))
+    purpose: The same kicks during a slow and the fastest owner-confirmed motion
+    plan: research §7.1 kill test 2(d)
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: planned
+    requires: [pickup_shake, tracker]
+    adjust: []
+    inputs:
+      - Tracker; confirmed speeds
+    criteria:
+      dropouts:
+        text: Dropouts < 1 % of frames; tracking at >= 2 mm crest during the fast motion
+        kind: operator
+    output: kill-test-2(d) table
+  estimator_validation:
+    num: "5.3"
+    group: g5
+    title: Estimator validation
+    purpose: Prediction at tau_cam + tau_a against later frames and held-out frames; NIS consistency
+    plan: research §4 (validation targets); codebase §7 (replay)
+    modes: [analysis]
+    status: planned
+    tool: sim/harness/drive_replay.py (planned)
+    requires: [moving_kicks, gamma_model]
+    adjust: [tick_hz, history_ms, pred_corr_min, pred_amp_err_max, pred_phase_err_max_deg, nis_in_band_min]
+    inputs:
+      - Moving-arm trials; replay determinism passing
+    criteria:
+      corr:
+        text: Crest correlation at least pred_corr_min
+        kind: auto
+        metric: pred_corr
+        op: ge
+        coeff: pred_corr_min
+    output: prediction-vs-frame table
+  path_sizing:
+    num: "6.1"
+    group: g6
+    title: Paths sized to the workspace
+    purpose: Line, circles, Lissajous, vertical loop with the holder fitted
+    plan: research §7.1 kill test 1
+    modes: [analysis]
+    status: planned
+    tool: planned (needs FK and IK [MISSING F1])
+    requires: [fk_check, payload_tcp]
+    adjust: [line_length_m, circle_radii_m]
+    inputs:
+      - FK; joint ranges
+    criteria:
+      fits:
+        text: Every path inside the joint ranges and the workspace with margin
+        kind: operator
+    output: config/paths.yaml
+  tracker:
+    num: "6.2"
+    group: g6
+    title: Slosh-free tracker and time scaling
+    purpose: Tilt law and IK tracker streaming the references at a speed factor
+    plan: research §5.1, §9 week 2
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: planned
+    requires: [path_sizing, servo_ladder]
+    adjust: []
+    inputs:
+      - Paths; confirmed period
+    criteria:
+      runs:
+        text: All path families run at confirmed speeds
+        kind: operator
+    output: tracker trials
+  peak_checks:
+    num: "6.3"
+    group: g6
+    title: Numerical peak checks before sending
+    purpose: Planned peak speed, acceleration (and jerk, by differencing) of every motion against confirmed.yaml
+    plan: codebase §3.8 item 5
+    modes: [analysis]
+    status: planned
+    tool: tools/elfin_py/motion.py (joint streams built; paths planned)
+    requires: [tracker]
+    adjust: []
+    inputs:
+      - Planned trajectories
+    criteria:
+      refuse:
+        text: Every over-limit plan refused, none clipped
+        kind: operator
+    output: limit-ratio table per path and speed factor
+  preview:
+    num: "6.4"
+    group: g6
+    title: Preview in the simulator and the mock
+    purpose: Every path through L1 and the mock before the arm
+    plan: research §6; codebase §3.8 item 10
+    modes: [dry-run, mock]
+    status: planned
+    tool: planned
+    requires: [peak_checks]
+    adjust: []
+    inputs:
+      - Planned trajectories
+    criteria:
+      clean:
+        text: No refusal, no Fail, no limit ratio above 1 in the preview
+        kind: operator
+    output: preview trials
+  killtest1:
+    num: "6.5"
+    group: g6
+    title: Kill test 1 (empty cup, bottleneck)
+    purpose: Scale the time law in owner-confirmed steps; which joint or limit binds first
+    plan: research §7.1 kill test 1; codebase §11 week 2
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: planned (kill-test-1 runner)
+    requires: [preview]
+    adjust: [bottleneck_ratio, speed_factors]
+    inputs:
+      - Owner-confirmed speed steps
+    criteria:
+      memo:
+        text: Kill-test-1 memo from logged limit ratios
+        kind: operator
+    output: docs/memos/killtest1.md
+  killtest3:
+    num: "6.6"
+    group: g6
+    title: Kill test 3 (residual slosh; the tuning set; added stage)
+    purpose: Slosh-free baseline with water at increasing speed factors and 0/20/40 ms of added delay
+    plan: research §7.1 kill test 3; codebase §8 (tuning set)
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: planned
+    requires: [killtest1, estimator_validation]
+    adjust: [speed_factors]
+    inputs:
+      - Front-end and estimator that passed
+    criteria:
+      table:
+        text: Residual crest vs speed and delay recorded (dataset tuning)
+        kind: operator
+    output: tuning trials
+  rt_safety:
+    num: "7.0"
+    group: g7
+    title: RT timing and safety checks (added stage)
+    purpose: Loop timing under load, allocation hook, and fault injection on the mock (dropout, NaN, Fail, state loss, spill flag, invalid vision -> M3)
+    plan: codebase §9 (timing, allocation, safety rows, valid-ray rule); research §2.3
+    modes: [mock, analysis]
+    status: planned
+    tool: tests/rt on the target machine (planned)
+    requires: [host_check]
+    adjust: [dropout_decel_s, rim_margin_mm]
+    inputs:
+      - The C++ RT process
+    criteria:
+      faults:
+        text: Each injected fault gives a streamed deceleration; invalid vision gives open loop, never a larger command
+        kind: operator
+    output: timing and safety report
+  corrector:
+    num: "7.1"
+    group: g7
+    title: Step 1 residual-slosh correction
+    purpose: Tune zeta_target, the predictor and the cap in simulation with injected latency, then on the arm at the lowest speed factor
+    plan: research §5.1, §6 (latency sweep); codebase §6 (anti-fight)
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: planned
+    requires: [killtest3, rt_safety]
+    adjust: [zeta_target, k_p, delta_a_cap_m_s2, joint_acc_fraction_max, band_low_rel, band_high_rel, dropout_disable_s]
+    inputs:
+      - Tuning set (kill test 3)
+    criteria:
+      reduces:
+        text: Correction reduces the residual on the line path (MS2)
+        kind: operator
+    output: docs/memos/corrector-choice.md
+  nmpc:
+    num: "7.2"
+    group: g7
+    title: Step 2 NMPC
+    purpose: Weights, horizon, constraints, solve rate; simulation first, then the arm
+    plan: research §5.2
+    modes: [dry-run, mock, arm]
+    status: planned
+    tool: planned (step 2)
+    requires: [corrector]
+    adjust: [nmpc_horizon_s, nmpc_nodes, nmpc_tube_mm, nmpc_limit_fraction, nmpc_solve_budget_ms]
+    inputs:
+      - "Model B or B'; acados"
+    criteria:
+      rate:
+        text: Solve rate at least 50 Hz [target]
+        kind: operator
+    output: NMPC trials
+  freeze:
+    num: "8.0"
+    group: g8
+    title: Freeze before the evaluation (added stage)
+    purpose: Config, metrics and run order fixed; randomization seed logged; tree clean
+    plan: research §7.2; codebase §3.7 P2, §8 (randomization, tuning/eval)
+    modes: [form]
+    status: built
+    tool: form
+    requires: [corrector]
+    adjust: [trials_per_cell, spill_outcome_definition, randomization_seed]
+    inputs:
+      - Coefficient version to freeze; record.py run order
+    fields:
+      metrics:
+        label: "Metrics fixed: motion time at equal spill outcome, peak crest at equal time, spill rate, spilled mass, achieved acceleration and jerk, every method's tracking error"
+        type: check
+      order:
+        label: Run order block-randomized by record.py, seed recorded
+        type: check
+    criteria:
+      spill_def:
+        text: The spill-outcome definition is set (open question Q7)
+        kind: auto
+        metric: spill_outcome_defined
+        op: is_true
+    output: frozen coefficient version; run order
+  eval_step1:
+    num: "8.1"
+    group: g8
+    title: Step-1 evaluation (M1-M4)
+    purpose: M3 vs M4 isolates what the camera adds; 5 trials per cell; randomized
+    plan: research §7.2
+    modes: [arm]
+    status: planned
+    tool: planned (record.py + RT process)
+    requires: [freeze]
+    adjust: []
+    inputs:
+      - Frozen config
+    criteria:
+      grid:
+        text: Full grid recorded and checked for gaps (MS5)
+        kind: operator
+    output: eval trials
+  killtests45:
+    num: "8.2"
+    group: g8
+    title: Kill tests 4 and 5 (step-2 data bank; added stage)
+    purpose: Swirl sweep and crest vs amplitude, recorded in week 14
+    plan: research §7.1 kill tests 4-5, §9 (MS4)
+    modes: [arm]
+    status: planned
+    tool: planned
+    requires: [corrector]
+    adjust: []
+    inputs:
+      - Same rig
+    criteria:
+      banked:
+        text: Both recorded
+        kind: operator
+    output: killtest trials
+  eval_step2:
+    num: "8.3"
+    group: g8
+    title: Step-2 evaluation
+    purpose: Angle-limit MPC baseline, NMPC with the camera loop on and off
+    plan: research §7.3
+    modes: [arm]
+    status: planned
+    tool: planned
+    requires: [nmpc, killtests45]
+    adjust: []
+    inputs:
+      - Step-2 stack
+    criteria:
+      grid:
+        text: Step-2 grid recorded
+        kind: operator
+    output: eval trials
+  figures:
+    num: "9.1"
+    group: g9
+    title: Figures and paper numbers
+    purpose: research §7.2 figures, each with its JSON sidecar
+    plan: codebase §3.6 A1-A3
+    modes: [analysis]
+    status: planned
+    tool: analysis/figures (planned)
+    requires: [eval_step1]
+    adjust: []
+    inputs:
+      - Eval trials
+    criteria:
+      sidecars:
+        text: Every figure has its sidecar
+        kind: operator
+    output: figures and sidecars
+  backup:
+    num: "9.2"
+    group: g9
+    title: Backup after each session
+    purpose: "Copy .bin of every dataset and .img of eval and killtest trials to the second disk (and offsite)"
+    plan: codebase §8 (backup)
+    modes: [analysis]
+    status: built
+    tool: tools/backup.sh
+    per_session: true
+    requires: [host_check]
+    adjust: []
+    inputs:
+      - "BACKUP_DISK (and BACKUP_OFFSITE) set [MISSING H9]"
+    criteria:
+      copied:
+        text: Backup finished without errors
+        kind: auto
+        metric: backup_ok
+        op: is_true
+    output: data/workbench/results/backup/
+  teardown:
+    num: "9.3"
+    group: g9
+    title: End of session (added stage)
+    purpose: Arm disabled, water out, lens and shield dry, journal line written
+    plan: codebase §3.7 P4; research R6
+    modes: [form]
+    status: built
+    tool: form
+    per_session: true
+    requires: []
+    adjust: []
+    inputs:
+      - Nothing running
+    fields:
+      disabled:
+        label: Arm disabled (or powered off from the pendant)
+        type: check
+      dry:
+        label: Water removed; lens, shield and tray dry
+        type: check
+      journal:
+        label: "Day's line written in docs/journal.md"
+        type: check
+    criteria:
+    output: form record

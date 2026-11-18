@@ -1,0 +1,69 @@
+# Open questions and missing hardware (hardware phase)
+
+Items the plans, the Elfin files and this phase's request do not settle. Nothing here is guessed: each says what
+is missing and how it would be settled. Markers as in the plans. "Owner" = a decision only the owner makes.
+
+## Missing hardware [MISSING]
+
+The request assumes these are ready: arm and cabinet, the Linux real-time machine, camera and lens on the cup
+holder, cup, lighting, scale, tray and drip shield. These items are needed by a stage but were not in that list:
+
+| # | Item | Needed by | What it must do |
+|---|---|---|---|
+| H1 | PC-driven LED in the camera's view, and how the PC switches it (USB GPIO or a microcontroller) | stage 3.3 (τ_cam), 3.4 (clock check) | switched at logged ticks; its own switching latency measured (codebase §5, "The LED and the trigger") |
+| H2 | Trigger output device for the camera's opto-input, if hardware triggering is chosen | stage 3.3, 3.4; CNN label option (i) | already **[MISSING: choice]** in both plans |
+| H3 | Rigid ChArUco board, ~120 × 90 mm, 10 mm squares, square size measured with calipers | stage 3.1 | research §3.1 |
+| H4 | Flat printed rim target that rests on the rim tab at rim height | stage 3.2 (T_KC) | research §3.1 |
+| H5 | Static printed target for the table, for the camera-on-target chirp | stage 2.3 (τ_a) | research §4, item 3 |
+| H6 | Thermometer for the water (resolution and probe) | stage 0, every session | water temperature is logged per session (request, stage 0) |
+| H7 | Reference masses to check the 0.01 g scale | stage 0, stage 8 (spilled mass) | — |
+| H8 | C-mount shim set (0.05/0.1/0.2/0.5 mm) | stage 3.1 (focus) | research §9, week 1; ≈ 0.05–0.1 mm needed **[unverified]** |
+| H9 | Second disk and an offsite target for `backup.sh`, sized for the image policy (≈ 2–3 TB **[unverified]**) | stage 9.2 (backup) | codebase §8 |
+| H10 | Food dye | stage 4 (dyed water is the contrast reference and the last resort) | research §9 |
+| H11 | **Only for CNN label option (i):** a side reference camera and lens, a mount (world-fixed: static ring-downs only; on the holder: weight, cable), side lighting, synchronization to the top camera (H2), and its calibration to the cup frame | CNN fallback, only if the owner allows it (Q1) | `docs/design/cnn_fallback.md` §3 |
+
+## Owner decisions
+
+| # | Question | Why it matters | Default until answered |
+|---|---|---|---|
+| Q1 | May a side reference camera be used for CNN labels and validation only? That changes research §0 ("Ground truth: the in-loop camera only") and codebase §10, which only the owner can change | label option (i) | not used |
+| Q2 | "Crest tracking error ≤ 1 mm in clear water": the plan's kill test 2(a) target reads "the first harmonic tracks down to ≤ 1 mm of crest". Is the gate criterion that (the smallest trackable crest), or an error of ≤ 1 mm against a reference (static tilts)? **[UNCLEAR]** | the gate (research §7.1, item 2) | the memo reports both; the pass rule uses the plan's reading |
+| Q3 | Dead-band criterion for the gate: the ring-down above the dead band for ≥ 1.0 s after the standard kick **[proposal]** | gate item 6 | as proposed |
+| Q4 | Valid-ray rule: c_min = 0.9, N_valid = 16 of 32, ≥ 2 per quadrant **[proposal]** | safety fallback to M3 (research §2.3) | as proposed, for both front-ends |
+| Q5 | Which lighting set-ups exactly, and how many (the plan says 2–3), and which one is held out of CNN training **[MISSING]** | gate "at least one set-up"; CNN splits | the hold-out is drawn by seed before training |
+| Q6 | The servo-ladder guard thresholds in the tool: 0.5° on the other joints, J6 band ±(A + 2)°, state stream stale after 0.5 s (still open from week 1) | stage 1.4 | as in the code |
+| Q7 | The definition of "equal spill outcome" for "motion time at equal spill outcome", e.g. 0 spills in 5 trials, or spilled mass below a threshold **[MISSING]** | stage 8 metrics, fixed before running | none: stage 8.0 refuses to freeze without it |
+| Q8 | How spilled mass is measured: the cup weighed before and after, or the tray **[MISSING]** | stage 8 | — |
+| Q9 | Should "accept" of the bring-up read write the limits block into `e03pro.yaml` itself (after a diff and a click), or keep the manual paste? | stage 1.1 | the workbench shows the block and the diff; the owner pastes |
+| Q10 | Workbench policy when it dies mid-stream: the tools stop (decelerate and disable) rather than finish **[proposal]**. The request allows either | codebase §12 | stop |
+| Q11 | Repo remote, and the first commit (nothing is committed yet) | backups of the code, P1 tags | — |
+| Q12 | Arm control settings: jog speed 10 mm/s, acceleration 50 mm/s², largest step 50 mm, box ±200/200/150 mm round the pose where the session starts, 2 s pause at each path point, idle timeout 300 s (the session ends and the arm is disabled) **[proposal]**. The safe workspace on your bench is not in the Elfin files **[MISSING]** | stage 1.6, Arm control tab | as proposed; change them on the Coefficients tab |
+| Q13 | Which way +X, +Y, +Z point on your bench: the diagram uses the base frame as ReadActPos reports it; check on the first step of each axis | Arm control tab | the first jog of each axis is 1–5 mm and watched |
+| Q14 | A late push in the servo ladder: skip to the current slot only while the jump stays within `confirmed.yaml`, otherwise decelerate; or resume from the next unsent sample and shift the schedule (pre-hardware review, question 1). How the controller treats late pushes is **[MISSING]** (elfin_commands.md, PROTO p.172–175) | stage 1.4 | skip within the limits, else decelerate (the first option, applied with the owner's go-ahead of 2026-11-18); the deceleration itself is never skipped |
+| Q15 | Every exit while a move may be under way: `GrpStop`, a wait of up to 10 s **[proposal]** for nMovingState = 0, then `GrpDisable` (review, question 2). What `GrpDisable` does to a moving arm is **[MISSING]**; `GrpStop` is **[UNTESTED]** on this arm | every arm tool | as stated (the first option, applied with the go-ahead); watch the first one on the arm |
+| Q16 | Questions asked with the arm enabled end the run after 300 s without an answer **[proposal]** (pose recorder; review, question 7). The servo ladder now asks before enabling and refuses if the joints moved more than 1° **[proposal]** between its plan and the enable ("slight movement" at brake release, LINUX p.17–18, is not quantified **[MISSING]**) | stages 1.4, 1.5 | as proposed |
+| Q17 | Two tool-side thresholds from review items S11 and S12 **[proposal]**: a reply still owed after its 2 s time-out is waited for 2 s more, then the link counts as out of step and only the stop commands go out; and a move whose start was not seen (nMovingState still 0; how soon it turns 1 is **[MISSING]**, PROTO p.189–191) counts as done once `ReadActPos` is within 0.1° per joint, or 0.5 mm and 0.2° of the pose target **[UNTESTED]**. If the arm settles further from its targets than that, moves will time out instead: watch the first ones | stages 1.3–1.6 | as proposed |
+| Q18 | Two checks from review items S17 and S20 **[proposal]**: while the Datasheet's e-stop and light-curtain flags are unknown (codebase §3.8 item 7), the servo ladder sends ReadRobotState between pushes about every 0.1 s, only when the slot has twice the slowest poll reply left, and stops streaming at once on an e-stop, light curtain, error or disable (`--state-poll-s 0` turns it off once week 1 shows the flags in the packets; the summary lists the keys that arrived). And every WayPoint move's joint speeds are read every 0.05 s (ReadActJointVel, PROTO p.71); a joint above the confirmed joint speed by more than 10 % stops the move, since a linear move's joint speeds are not planned and that dVelocity is the profile's peak is **[UNTESTED]** | stages 1.3–1.6 | as proposed |
+| Q19 | Three record-keeping thresholds from review items D6 and D8 **[proposal]**: the workbench renews its data-folder lock every 10 s, and a lock not renewed for 60 s counts as left by a workbench that died and is taken over (a workbench suspended longer than that, a laptop asleep say, then starts no more runs); and a trial log that was never closed counts as abandoned after a day without change, so a tool started from a terminal can wait at a prompt that long before the workbench gives its trial a run folder | workbench start-up | as proposed |
+
+## Facts the sources do not give [MISSING] / [UNCLEAR]
+
+Carried from the plans; each blocks the stage named, and the plans say how to find it.
+
+| # | Item | Blocks | How it is settled |
+|---|---|---|---|
+| F1 | The E03-Pro kinematic model; the knowledge files mention only the `elfin5` URDF (elfin_overview.md) **[MISSING]** | stage 2.2 (FK check), IK tracker, stage 6 (joint-space checks), kill test 1 | the E03 STEP model or a vendor E03 description; checked against the recorded `ReadActPos` poses |
+| F2 | The Rx, Ry, Rz convention of `ReadActPos` (elfin_commands.md, PROTO p.66–67) **[MISSING]** | stage 2.2 orientations | poses where one joint alone moves (codebase §9) |
+| F3 | The controller's flange-frame axis directions, for the payload's centre of mass **[MISSING]** | stage 2.1 | jog along each tool axis from the pendant (research §3.1, item 3) |
+| F4 | No command reads the payload back **[MISSING]** (codebase §3.8 item 8) | stage 2.1 | operator confirmation at every start-up |
+| F5 | Joint ranges disagree between sources **[UNCLEAR]**; no read command **[MISSING]** (elfin_overview.md) | stage 1.1, 1.5, 6 | entered from the pendant (LINUX p.50) |
+| F6 | Whether joint limits, collision detection and Reduced mode act on servo streams **[MISSING]** (elfin_overview.md) | stage 1.4 onward | the tools enforce `confirmed.yaml` themselves; ask the vendor |
+| F7 | Servo minimum period, lookahead semantics, how to leave servo mode, late-push behaviour **[MISSING]**; `GrpStop` during streaming **[UNTESTED]** (elfin_commands.md, PROTO p.172–175) | stage 1.4, the stop button's effect | the servo ladder; the vendor |
+| F8 | The meaning of `Fail` codes; `HansRobot_ErrorCode.docx` is not in the files **[MISSING]** (elfin_overview.md, PROTO p.3, p.192) | every stage on the arm (error reports) | ask the vendor |
+| F9 | Whether the controller accepts `20.0000` where the manual shows `20` **[UNTESTED]** (codebase R-B) | stage 1.3 | move_test's first WayPoint |
+| F10 | Camera timestamp latch event, clock rate and drift, ROI frame rate, exposure-to-host latency **[MISSING]** | stage 3.3, 3.4 | LED test (research §0, §4) |
+| F11 | Camera library **[MISSING: choice]** and trigger mode **[MISSING: choice]** | stage 3 onward | week-1 decision (codebase §11) |
+| F12 | Cup wall thickness and outer diameter **[MISSING]** | the yoke; the occlusion mask; T_KC | calipers (research §0) |
+| F13 | Whether food dye changes the meniscus **[unverified]** | CNN label option (ii) | compare dyed and clear fills of the same measured height at rest |
+| F14 | The Linux machine: distribution, PREEMPT_RT kernel **[unverified]**, Python 3.12 available | everything on the arm | check on the machine |
+| F15 | Public code for the M2 baseline (Muchacho QP) **[unverified]** | stage 8 | the authors' repositories |

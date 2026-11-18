@@ -1,0 +1,3 @@
+# Development only. Tools that talk to the arm use the standard library only (codebase plan §2).
+pytest>=8
+PyYAML>=6

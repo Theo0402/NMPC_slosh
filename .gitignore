@@ -1,0 +1,9 @@
+# data never goes into git (codebase plan §2, §8)
+/data/
+# generated C, never hand-edited (codebase plan §2)
+/rt/core/gen/
+/build/
+/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

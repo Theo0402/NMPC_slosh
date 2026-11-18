@@ -1,0 +1,19 @@
+# Camera settings (codebase plan §2, §5 header camera block). SI units.
+# Open week-1 decisions: the camera library (MVS SDK or another GenICam library) and the
+# trigger mode (free-run with a clock fit, or hardware-triggered on Line 0).
+camera:
+  model: MV-CS016-10UM     # Hikrobot; Sony IMX273, 1440 x 1080, 3.45 um, <= 249.1 fps full frame (README)
+  serial: null
+  library: null            # [MISSING: choice] week 1
+  pixel_format: Mono8
+  roi: [0, 0, 1440, 1080]  # offset_x, offset_y, width, height, px
+  exposure_s: null         # <= 0.001 [target]
+  gain_db: null
+  frame_rate_hz: 200.0     # [target]
+  trigger_mode: null       # [MISSING: choice] free_run | line0
+  timestamp_tick_hz: null  # as reported by the camera; the true rate is [MISSING] until measured
+lens:
+  model: Kowa LM4NCL       # 3.5 mm, C-mount (README)
+  f_number: null           # operator-entered
+  focus_state: null        # operator-entered, e.g. "locked at 114 mm"
+  shim_mm: null

@@ -1,0 +1,2 @@
+# Analysis (codebase plan §2): identification fits and figures. Not needed by the arm tools or the workbench.
+numpy>=1.26

@@ -1,0 +1,23 @@
+# Owner-confirmed speeds and stream rate (codebase plan §3.8 item 5).
+#
+# ONLY THE OWNER EDITS THIS FILE. Each change is its own commit, with a journal line
+# saying what was seen at the previous step. Every tool refuses, before sending, any
+# motion whose planned peak speed or acceleration exceeds these values, and any servo
+# period shorter than servo_period_s. Tools refuse; they never clip.
+#
+# Starting values confirmed by the owner in week 1. The accelerations are example 2's
+# values (elfin_examples.md). The servo period and lookahead are the manual's example
+# (elfin_commands.md, PROTO p.172).
+#
+# Servo ladder (research plan §9, week 1): one period per run, at servo_period_s below.
+#   0.2 -> 0.1 -> 0.05 -> 0.04 -> 0.03 -> 0.02 -> 0.015 -> 0.01 s
+# The lookahead stays at 0.02 s for the whole ladder.
+
+joint_speed_deg_s: 20.0          # WayPoint joint moves (dVelocity, PROTO p.137-139)
+joint_acc_deg_s2: 100.0          # WayPoint joint moves (dAcc)
+linear_speed_mm_s: 20.0          # WayPoint linear moves (dVelocity)
+linear_acc_mm_s2: 100.0          # WayPoint linear moves (dAcc)
+stream_joint_speed_deg_s: 20.0   # peak joint speed of a streamed trajectory
+stream_joint_acc_deg_s2: 100.0   # peak joint acceleration of a streamed trajectory
+servo_period_s: 0.2              # shortest confirmed dServoTime (StartServo, PROTO p.172)
+servo_lookahead_s: 0.02          # dLookaheadTime (StartServo, PROTO p.172)

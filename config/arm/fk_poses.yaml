@@ -1,0 +1,11 @@
+# Joint configurations for the week-2 FK check (research plan §0; codebase plan §9, §11).
+# About 20, spread over the workspace, chosen and entered by the owner. Degrees, J1-J6.
+# Recorded on the bare flange with zero TCP and user frame, joint moves at the confirmed
+# speed, with the owner present: python -m tools.elfin_py.pose_recorder --arm
+# Include poses where one joint alone has moved from a reference pose, so that the Rx, Ry, Rz
+# convention can be established before orientations are compared (owner, week 1).
+# Every pose is checked against joint_ranges_deg in e03pro.yaml, which must be entered first.
+#
+# Example entry (not a pose to use):
+#   - [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]
+poses: []

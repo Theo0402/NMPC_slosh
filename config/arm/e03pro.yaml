@@ -1,0 +1,50 @@
+# Han's Robot Elfin E03-Pro, serial MH217340001, Mini Cabinet HRC-E0610-A3
+# (elfin_overview.md, QC p.1). Codebase plan §2 and §3.8.
+#
+# Settings sent over TCP revert at controller restart (elfin_overview.md, PROTO p.5), so
+# start-up reads back what can be read and refuses to enable if it differs from this file
+# (codebase plan §3.8 item 8). Values marked null have not been read or entered yet.
+
+address:
+  ip: 192.168.0.10     # the lab's scripts [E03] (elfin_overview.md, MATLAB Connect_robotarm.m:3); confirm on the pendant (NET p.3). ELFIN_IP overrides.
+  cmd_port: 10003      # commands (elfin_overview.md, PROTO p.7)
+  state_port: 10004    # Datasheet, JSON at 20 Hz (PROTO p.7)
+
+robot_id: 0            # nRbtID, 0-5, default 0 (elfin_commands.md, PROTO p.17)
+
+identity:
+  model: null                # ReadRobotModel reply (PROTO p.16); the manual's example "5KG" is not expected. Read in week 1.
+  controller_version: null   # pendant About screen (LINUX p.19); 5.51.5_EPro4ms.beta.20230522 at inspection [E03] (QC p.2-3)
+
+# What the pendant must show before enabling. The operator confirms payload and TCP at
+# every start-up, because no command reads the payload back [MISSING] (codebase plan §3.8 item 8).
+# First bring-up: bare flange (owner, week 1). When the holder goes on: payload = weighed
+# holder + cup + water, centre of mass in the flange frame found by the jog test; TCP = cup
+# axis at rim height, taught as CUPRIM; then tcp_name becomes CUPRIM and tool_frame its values.
+mounting:
+  description: bare flange
+  payload_kg: 0.0
+  tcp_name: TCP              # sTcpName for WayPoint (PROTO p.137-139); default tool frame (PROTO p.2)
+  ucs_name: Base             # sUcsName; default user frame (PROTO p.2)
+  tool_frame: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # as ReadActPos returns it: mm, deg (PROTO p.66-67)
+  user_frame: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  frame_tolerance: 0.001     # |read - config| allowed per value, mm or deg
+
+# Limits read back with ReadJointMaxVel/Acc/Jerk and ReadLinearMaxVel (PROTO p.56-59).
+# null until the bring-up read; record_id names the trial that read them. Tools that
+# enable the arm refuse while these are null, and refuse if a read differs.
+limits_readback:
+  record_id: null
+  joint_max_vel_deg_s: null      # 6 values
+  joint_max_acc_deg_s2: null     # 6 values
+  joint_max_jerk_deg_s3: null    # 6 values
+  linear_max: null               # [mm/s, mm/s^2, mm/s^3]; 3 values (the format line's 6 is [UNCLEAR], PROTO p.59)
+  tolerance: 0.001
+
+# Joint ranges as the pendant shows them (LINUX p.50). The protocol has no read command
+# [MISSING]; sources disagree [UNCLEAR] (elfin_overview.md). Entered by the operator.
+joint_ranges_deg: null           # [[min, max] x 6]
+
+servo_in_use:
+  period_s: 0.2        # must not be shorter than confirmed.yaml servo_period_s
+  lookahead_s: 0.02
