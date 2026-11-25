@@ -1,4 +1,7 @@
-"""Enable and move (example 2): J6 by +10 deg, then the tool 20 mm up. With --return, back again.
+"""Enable and move (example 2): J6 by +10 deg, then the tool 20 mm up. With --return, back again: J6 first, then
+the tool down, so the last move is a straight one. In every finished 1.3 arm run that ended on the joint move,
+GrpDisable answered Fail 20018; after straight moves (Arm control) it was answered OK (2026-11-25/26; the cause is
+[UNCLEAR], the code's meaning [MISSING], open_questions F8 and Q20). This order tests that.
 
     python -m tools.elfin_py.move_test --dry-run | --mock | --arm [--return]
 
@@ -72,10 +75,15 @@ def main(argv=None):
             if args.ret:
                 arm.check_before_motion()
                 j, p, _, _ = arm.act_pos()
-                linear_move(arm, p[:2] + [p[2] - 20.0] + p[3:], j, m, "3")
+                log.event(triallog.EV_PHASE, "return: joint move J6 -10 deg")
+                joint_move(arm, p, j[:5] + [j[5] - 10.0], m, "3")
                 arm.check_before_motion()
-                j, p, _, _ = arm.act_pos()
-                joint_move(arm, p, j[:5] + [j[5] - 10.0], m, "4")
+                j, p, tool, user = arm.act_pos()
+                problems = link.frame_problems(tool, user, m)
+                if problems:
+                    raise link.Refused("before the linear move back: " + "; ".join(problems))
+                log.event(triallog.EV_PHASE, "return: linear move Z -20 mm (the last move is a straight one)")
+                linear_move(arm, p[:2] + [p[2] - 20.0] + p[3:], j, m, "4")
             joints1, pose1, _, _ = arm.act_pos()
             summary = {"joints_start": joints0, "pose_start": pose0, "joints_end": joints1, "pose_end": pose1,
                        "format_test": "WayPoint with 4-decimal speeds accepted"}

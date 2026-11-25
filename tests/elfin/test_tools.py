@@ -138,6 +138,14 @@ def test_move_test_dry_run_with_return(tmp_path):
     assert names(only_trial(tmp_path)).count("WayPoint") == 4
 
 
+def test_move_test_returns_with_a_straight_move_last(tmp_path, mock):
+    """J6 back first, then the flange down: GrpDisable answered 20018 only after a finished joint move (Q20)."""
+    assert move_test.main(mock_args(mock) + configs(tmp_path) + ["--return"]) == 0
+    moves = [s.split(",") for s in sent(only_trial(tmp_path)) if s.startswith("WayPoint")]
+    assert [m[19] for m in moves] == ["0", "1", "0", "1"]                 # nMoveType: joint, linear, joint, linear
+    assert abs(mock.arm.q[5] - sim.MOCK_HOME_DEG[5]) < 1e-6 and abs(mock.arm.pose[2] - sim.MOCK_HOME_POSE[2]) < 1e-6
+
+
 def test_refuses_without_recorded_limits(tmp_path, mock):
     with pytest.raises(link.Refused, match="not recorded"):
         move_test.main(mock_args(mock) + configs(tmp_path, limits=False))
