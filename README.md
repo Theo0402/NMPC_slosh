@@ -23,6 +23,23 @@ fits need NumPy: `pip install -r requirements-analysis.txt`. Run every command f
 python -m tools.workbench            # then open http://127.0.0.1:8765
 ```
 
+From the Windows PC, double-click `tools\start_workbench.bat`: it opens the SSH tunnel, starts the workbench on the
+Linux machine (`ssh slosh-linux`, folder `~/Desktop/NMPC_slosh`; set `SLOSH_HOST` / `SLOSH_DIR` for others) and
+opens the page. Closing its window stops the workbench; a tool still running gets its stop first (SIGHUP acts like
+Ctrl-C).
+
+Without a browser, `python -m tools.wb` does the same through the workbench's API (every check, lock, question and run
+folder stays the workbench's):
+
+```bash
+python -m tools.wb up                                   # start the workbench in the background
+python -m tools.wb run bringup_read arm --override "..." # run a stage; questions are printed with their numbers
+python -m tools.wb answer 1 yes                         # the operator's answer (never given by the client itself)
+python -m tools.wb run arm_control arm                  # then: jog z -5 | goto X Y Z | pose | corner | ws-save --note ... | end
+python -m tools.wb stop                                 # the STOP button
+python -m tools.wb down
+```
+
 The first tab, **Arm control**, connects to the arm (dry run, mock, or the real arm on the Linux machine), moves the
 cup slowly with arrow buttons (straight lines, cup orientation held, 10 mm/s by default), sets start, middle and
 end points where the arm is, saves them as a path, and runs the path with a pause at each point. A diagram shows

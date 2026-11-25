@@ -14,6 +14,13 @@ a Fail ends the session, and GrpDisable runs on every exit. No move leaves the j
 where this session enabled the arm, and a recorded point must have the session's orientation, so the
 cup keeps the orientation it had at the start (the operator confirms it is upright).
 
+Workspace box (owner request, 2026-11-25): workspace_box_mm = [x_min, x_max, y_min, y_max, z_min, z_max] is a fixed
+cuboid in the coordinates ReadActPos reports (PROTO p.66-67), taught on the Arm control tab by jogging to the corners
+of the free space. No move may end outside it. Moves are straight lines, so a move between two points inside the box
+stays inside it. If the arm is outside the box when a move is asked for, a move is allowed only if it ends no further
+outside on any axis (so the operator can bring it back in); a path's points must all be inside. The box bounds the
+TCP point only: the cup holder's size and the elbow are not checked, so teach the corners with that in mind.
+
 The stop button (or a dead workbench) during a move sends GrpStop (PROTO p.20; what it does on this arm
 is [UNTESTED]), waits for the arm to settle, and ends the session. Any other error during a move (no reply,
 a protocol or socket error) ends the session the same way: the exit sequence sends GrpStop before GrpDisable
@@ -45,7 +52,7 @@ FIRST_RUN = ("Jog moves are linear, at the jog speed (10 mm/s by default), orien
              "moves the wrong way, rotates the cup, or keeps going.")
 DEFAULTS = {"jog_speed_mm_s": 10.0, "jog_acc_mm_s2": 50.0, "jog_max_step_mm": 50.0,
             "jog_box_mm": [200.0, 200.0, 150.0], "path_dwell_s": 2.0,
-            "jog_idle_timeout_s": 300.0}                                       # as config/params.schema.yaml
+            "jog_idle_timeout_s": 300.0, "workspace_box_mm": None}            # as config/params.schema.yaml
 AXES = {"x": 0, "y": 1, "z": 2}
 ORIENT_TOL_DEG = 0.5
 IDLE_POLL_S = 0.5
@@ -95,6 +102,14 @@ def check_settings(s):
             problems.append("path_dwell_s must not be negative")
     except CommandRefused as exc:
         problems.append(str(exc))
+    if s.get("workspace_box_mm") is not None:
+        try:
+            ws = _vector(s["workspace_box_mm"], "workspace_box_mm", 6)
+            for i, name in enumerate("XYZ"):
+                if not ws[2 * i] < ws[2 * i + 1]:
+                    problems.append(f"workspace_box_mm: {name} min {ws[2 * i]} must be below {name} max {ws[2 * i + 1]}")
+        except CommandRefused as exc:
+            problems.append(str(exc))
     if problems:
         raise link.Refused("the Arm control settings are not usable: " + "; ".join(problems) +
                            " (the Coefficients tab)")
@@ -112,6 +127,26 @@ def settings(block=None):
 
 def angle_diff(a, b):
     return (a - b + 180.0) % 360.0 - 180.0
+
+
+def outside_by(ws, xyz):
+    """How far each of X, Y, Z lies outside the workspace box ws = [x_min, x_max, ...] (0 inside), in mm."""
+    return [max(ws[2 * i] - xyz[i], xyz[i] - ws[2 * i + 1], 0.0) for i in range(3)]
+
+
+def check_workspace(ws, target, now_xyz=None):
+    """Refuse a move that ends outside the workspace box. With now_xyz (where the arm is), a target outside is
+    allowed only if it is no further outside on any axis, so an arm outside the box can be brought back in."""
+    if ws is None:
+        return
+    out_t = outside_by(ws, target)
+    out_n = outside_by(ws, now_xyz) if now_xyz is not None else [0.0, 0.0, 0.0]
+    for i, name in enumerate("XYZ"):
+        if out_t[i] > out_n[i] + 1e-6:
+            lo, hi = ws[2 * i], ws[2 * i + 1]
+            raise CommandRefused(f"{name} {target[i]:.1f} mm is outside the workspace box ({name} {lo:.1f} to {hi:.1f} mm, "
+                                 "workspace_box_mm)" + (f"; the arm is outside it now, so only moves back towards it are "
+                                                        "allowed" if any(out_n) else ""))
 
 
 class Session:
@@ -133,9 +168,11 @@ class Session:
         self.chan.emit(kind, moving=self.moving, home=self.home, idle_left_s=round(self.idle_left(), 1), **p)
         return p
 
-    def check_target(self, target, now):
+    def check_target(self, target, now, inside=False):
+        """inside=True: the target must be inside the workspace box even if the arm is outside it now (paths)."""
         if self.home is None:
             raise CommandRefused("the session has not started")
+        check_workspace(self.s.get("workspace_box_mm"), target, None if inside else now["pose"][:3])
         box = self.s["jog_box_mm"]
         for i, name in enumerate("XYZ"):
             if abs(target[i] - self.home[i]) > box[i] + 1e-9:
@@ -206,7 +243,7 @@ class Session:
             now = self.read()
             targets = [self.point_target(p, now) for p in points]
             for t in targets:                            # check every point before the first move
-                self.check_target(t, now)
+                self.check_target(t, now, inside=True)
             for k, (p, t) in enumerate(zip(points, targets), 1):
                 self.chan.emit("progress", id=cid, step=k, of=len(points), point=p.get("name"))
                 self.move_to(t, f"{cid}.{k}")

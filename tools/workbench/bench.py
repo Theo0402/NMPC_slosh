@@ -5,6 +5,7 @@ Standard library only.
 """
 import datetime
 import json
+import math
 import os
 import pathlib
 import re
@@ -609,6 +610,69 @@ class Workbench:
                         encoding="utf-8")
         self.status.audit("points", path=name, changed=[pt["name"] for pt in clean], note=note)
         return {"name": name, "points": clean}
+
+    # ------------------------------------------------------------------ workspace box (taught by jogging)
+    WORKSPACE_MIN_SPAN_MM = 10.0
+
+    def _workspace_dir(self):
+        d = self.data_dir / "workbench" / "workspace"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def workspace_view(self):
+        """The saved workspace box (the coefficient workspace_box_mm) and the record of how it was taught."""
+        snap = self.coeffs.snapshot()
+        entry = snap["values"].get("workspace_box_mm") or {}
+        records = sorted(self._workspace_dir().glob("*.json"))
+        last = json.loads(records[-1].read_text(encoding="utf-8")) if records else None
+        return {"box": entry.get("value"), "version": snap["version"], "source": entry.get("source"),
+                "note": entry.get("note"), "last_record": last}
+
+    def set_workspace(self, corners, margin_mm=0.0, note=""):
+        """The box round the corners the operator jogged to (X, Y, Z of each, as ReadActPos reported them), shrunk by
+        margin_mm on every side, saved as a new coefficient version. It applies from the next Arm control session."""
+        if not note or not str(note).strip():
+            raise Refused("say what the box is for (a note is kept with the version)")
+        try:
+            pts = [[float(v) for v in c[:3]] for c in corners or []]
+            margin = float(margin_mm or 0.0)
+        except (TypeError, ValueError):
+            raise Refused("each corner is X, Y, Z in mm")
+        if len(pts) < 2 or any(len(p) != 3 or not all(math.isfinite(v) for v in p) for p in pts):
+            raise Refused("record at least two corners (opposite corners of the free space), each X, Y, Z in mm")
+        if not (math.isfinite(margin) and margin >= 0):
+            raise Refused("the margin is 0 mm or more")
+        box = []
+        for i, name in enumerate("XYZ"):
+            lo, hi = min(p[i] for p in pts) + margin, max(p[i] for p in pts) - margin
+            if hi - lo < self.WORKSPACE_MIN_SPAN_MM:
+                raise Refused(f"the box is only {hi - lo:.1f} mm along {name} after the {margin:g} mm margin; it needs at "
+                              f"least {self.WORKSPACE_MIN_SPAN_MM:g} mm: record corners that differ in {name}")
+            box += [round(lo, 1), round(hi, 1)]
+        try:
+            snap, diff = self.coeffs.edit({"workspace_box_mm": box}, str(note),
+                                          source=f"taught on Arm control ({len(pts)} corners, {margin:g} mm margin)")
+        except CoeffError as exc:
+            raise Refused(str(exc))
+        rec = {"saved_utc": utc_now(), "box": box, "corners": pts, "margin_mm": margin, "note": str(note),
+               "coeff_version": snap["version"]}
+        path = self._workspace_dir() / f"{datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')}_v{snap['version']:06d}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+        os.replace(tmp, path)
+        self.status.audit("workspace", version=snap["version"], box=box, corners=len(pts), margin_mm=margin, note=note)
+        return {"box": box, "version": snap["version"], "diff": diff, "stale": self.reg.stale_after(snap["changed"])}
+
+    def clear_workspace(self, note=""):
+        """Remove the workspace box (a new coefficient version with null); from the next session only the jog box holds."""
+        if not note or not str(note).strip():
+            raise Refused("say why the box is removed")
+        try:
+            snap, diff = self.coeffs.edit({"workspace_box_mm": None}, str(note), source="cleared on Arm control")
+        except CoeffError as exc:
+            raise Refused(str(exc))
+        self.status.audit("workspace", version=snap["version"], box=None, note=note)
+        return {"box": None, "version": snap["version"], "diff": diff}
 
     def stop(self, run_id=None):
         """The stop button. It always stops the current run, even from a page that shows an earlier one."""

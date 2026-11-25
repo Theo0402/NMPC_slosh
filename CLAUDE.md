@@ -17,8 +17,11 @@ session: it says where the work stands and what comes next.
 - **No speed or stream-rate increase without asking the owner.** When a number turns out different from
   what was promised, say so plainly.
 - **Only the owner edits `config/arm/confirmed.yaml`.**
-- **Claude sends nothing to the arm.** Arm runs (`--arm`, or the workbench's arm mode) are started by the
-  owner, on the Linux machine, with the e-stop in reach. Claude may run dry runs, mock runs and tests.
+- **Arm runs only at the owner's word (owner's change, 2026-11-25).** Claude may run arm commands on the Linux
+  machine through `python -m tools.wb` (the workbench's API) when the owner asks in chat and is at the e-stop.
+  Every question a tool asks goes to the owner in chat; Claude passes on the owner's answer and never answers one
+  itself (`--yes` is refused on the arm). Never get round the workbench's checks, locks or refusals. Dry runs, mock
+  runs and tests as before.
 - **`data/` is never tracked in git** (`.gitignore`). Trial files are never renamed or edited.
 - Which file wins when two disagree: `docs/plans/README.md` ("Which file wins").
 - Record decisions and fixes in `docs/journal.md` (one line per day, week numbers only) and owner questions

@@ -286,7 +286,7 @@ stages:
     files: ["config/arm/confirmed.yaml", "config/arm/e03pro.yaml#mounting"]
     inputs:
       - "The Arm control tab; linear moves only, orientation held, at jog_speed_mm_s and jog_acc_mm_s2 (never above confirmed.yaml)"
-    adjust: [jog_speed_mm_s, jog_acc_mm_s2, jog_max_step_mm, jog_box_mm, path_dwell_s, jog_idle_timeout_s]
+    adjust: [jog_speed_mm_s, jog_acc_mm_s2, jog_max_step_mm, jog_box_mm, workspace_box_mm, path_dwell_s, jog_idle_timeout_s]
     criteria:
       ended:
         text: The session ended normally (exit code 0)

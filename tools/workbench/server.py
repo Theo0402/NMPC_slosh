@@ -131,6 +131,8 @@ def make_handler(bench):
                 return self._guard(bench.backup_view)
             if u.path == "/api/points":
                 return self._guard(bench.paths)
+            if u.path == "/api/workspace":
+                return self._guard(bench.workspace_view)
             self._send(404, {"error": "not found"})
 
         def do_POST(self):
@@ -165,6 +167,9 @@ def make_handler(bench):
                 "/api/backup/settings": lambda: bench.backup_settings(b["folder"], bool(b.get("auto", True))),
                 "/api/backup/restore": lambda: bench.restore_run(b["name"], bool(b.get("overwrite"))),
                 "/api/points": lambda: bench.save_path(b.get("name", ""), b.get("points") or [], b.get("note", "")),
+                "/api/workspace": lambda: bench.set_workspace(b.get("corners") or [], b.get("margin_mm", 0.0),
+                                                              b.get("note", "")),
+                "/api/workspace/clear": lambda: bench.clear_workspace(b.get("note", "")),
                 "/api/confirmed": lambda: bench.change_confirmed(b.get("changes") or {}, b.get("phrase", ""),
                                                                  b.get("note", "")),
             }

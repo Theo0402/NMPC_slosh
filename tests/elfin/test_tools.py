@@ -20,15 +20,22 @@ MOCK_LIMITS = """limits_readback:
   linear_max: [1000.0, 2500.0, 10000000.0]
   tolerance: 0.001
 """
+NO_LIMITS = """limits_readback:
+  record_id: null
+  joint_max_vel_deg_s: null
+  joint_max_acc_deg_s2: null
+  joint_max_jerk_deg_s3: null
+  linear_max: null
+  tolerance: 0.001
+"""                                                    # e03pro.yaml as it was before stage 1.1 read the arm
 SHORT = motion.LadderProfile(amplitude_deg=1.0, period_s=2.0, motion_s=2.0, taper_s=0.5, hold_s=0.3)
 
 
 def configs(tmp_path, limits=True, period=0.1, ranges=None):
     arm = (ROOT / "config/arm/e03pro.yaml").read_text(encoding="utf-8")
-    if limits:
-        start = arm.index("limits_readback:")
-        end = arm.index("\n\n", start)
-        arm = arm[:start] + MOCK_LIMITS.rstrip("\n") + arm[end:]
+    start = arm.index("limits_readback:")
+    end = arm.index("\n\n", start)
+    arm = arm[:start] + (MOCK_LIMITS if limits else NO_LIMITS).rstrip("\n") + arm[end:]
     if ranges:
         arm = arm.replace("joint_ranges_deg: null", f"joint_ranges_deg: {ranges}")
     conf = (ROOT / "config/arm/confirmed.yaml").read_text(encoding="utf-8")
@@ -68,7 +75,8 @@ def last_event(trial):
 def test_config_files_load():
     confirmed, arm, texts = config.load()
     assert confirmed["servo_period_s"] == 0.2 and confirmed["joint_acc_deg_s2"] == 100.0
-    assert arm["mounting"]["payload_kg"] == 0.0 and not config.limits_known(arm)
+    assert arm["mounting"]["payload_kg"] == 0.0
+    assert config.limits_known(arm)                    # recorded from the arm by stage 1.1 (2026-11-24)
 
 
 def test_bringup_read_dry_run(tmp_path, capsys):

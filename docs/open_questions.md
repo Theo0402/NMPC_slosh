@@ -65,5 +65,5 @@ Carried from the plans; each blocks the stage named, and the plans say how to fi
 | F11 | Camera library **[MISSING: choice]** and trigger mode **[MISSING: choice]** | stage 3 onward | week-1 decision (codebase §11) |
 | F12 | Cup wall thickness and outer diameter **[MISSING]** | the yoke; the occlusion mask; T_KC | calipers (research §0) |
 | F13 | Whether food dye changes the meniscus **[unverified]** | CNN label option (ii) | compare dyed and clear fills of the same measured height at rest |
-| F14 | The Linux machine: distribution, PREEMPT_RT kernel **[unverified]**, Python 3.12 available | everything on the arm | check on the machine |
+| F14 | The Linux machine: distribution, PREEMPT_RT kernel **[unverified]**, Python 3.12 available. **Answered 2026-11-25** (`python -m tools.host_check`): `msy-robot`, Ubuntu 22.04.5 LTS, kernel 6.8.0-149-generic, **no PREEMPT_RT** (stage 7.0 needs it; not installed yet), 12 CPUs, no `isolcpus`; Python 3.12.16 from the deadsnakes PPA beside the system 3.10 (`.venv` uses 3.12; `python3` stays 3.10 for Ubuntu) | everything on the arm | check on the machine |
 | F15 | Public code for the M2 baseline (Muchacho QP) **[unverified]** | stage 8 | the authors' repositories |

@@ -179,6 +179,15 @@ tunables:
     marker: proposal
     from: none; the safe workspace is not in the Elfin files [MISSING]
     doc: No move goes further than this in X, Y, Z from where the session enabled the arm
+  workspace_box_mm:
+    stage: arm_control
+    type: f64_list
+    unit: mm
+    range: [-2000.0, 2000.0]
+    default: null
+    marker: owner
+    from: taught by the owner on the Arm control tab (corners recorded by jogging); the safe workspace is not in the Elfin files [MISSING]
+    doc: "Fixed workspace cuboid [x_min, x_max, y_min, y_max, z_min, z_max] of the TCP, in the coordinates ReadActPos reports; no jog or point move may end outside it (null: not set). The TCP only: the holder and the elbow are not checked"
   jog_idle_timeout_s:
     stage: arm_control
     type: f64

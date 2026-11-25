@@ -5,6 +5,7 @@ It is a separate process from the tools and the RT process and is never in the c
 button is a software stop; keep the e-stop within reach.
 """
 import argparse
+import signal
 import sys
 
 from tools.workbench.backup import default_folder
@@ -59,16 +60,30 @@ def _serve(bench, httpd, a):
     print("arm mode: " + ("allowed on this machine" if not hp else f"not available here ({hp})"))
     print("The stop button is a software stop. Keep the e-stop within reach. Ctrl-C ends the workbench;")
     print("a tool still running then stops itself safely (its channel closes).", flush=True)
+    _stop_on_hangup()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         if bench.run is not None and bench.run.running:
-            print("stopping the running tool ...", file=sys.stderr)
+            try:                                  # the terminal may be gone (a closed launcher window)
+                print("stopping the running tool ...", file=sys.stderr)
+            except (OSError, ValueError):
+                pass
             bench.run.stop()
             bench.run.thread.join(timeout=30)
         httpd.server_close()
+
+
+def _stop_on_hangup():
+    """A closed terminal (SIGHUP, e.g. the launcher window on the PC closed) or SIGTERM ends the workbench like Ctrl-C:
+    a running tool gets its stop first and the data-folder lock is released."""
+    def handler(signum, frame):
+        raise KeyboardInterrupt
+    for name in ("SIGHUP", "SIGTERM"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), handler)
 
 
 if __name__ == "__main__":

@@ -170,7 +170,7 @@ Modes: `dry-run`, `mock`, `arm` (a tool that talks to the arm); `form` (a checkl
 - **Tool:** `tools.elfin_py.jog` (built)
 - **Requires:** 1.3 move_test
 - **Inputs:** The Arm control tab; linear moves only, orientation held, at jog_speed_mm_s and jog_acc_mm_s2 (never above confirmed.yaml)
-- **Adjust:** `jog_speed_mm_s` (mm/s, [1.0, 100.0]; proposal); `jog_acc_mm_s2` (mm/s^2, [10.0, 500.0]; proposal); `jog_max_step_mm` (mm, [1.0, 100.0]; proposal); `jog_box_mm` (mm, [0.0, 600.0]; proposal); `path_dwell_s` (s, [0.0, 30.0]; proposal); `jog_idle_timeout_s` (s, [5.0, 3600.0]; proposal)
+- **Adjust:** `jog_speed_mm_s` (mm/s, [1.0, 100.0]; proposal); `jog_acc_mm_s2` (mm/s^2, [10.0, 500.0]; proposal); `jog_max_step_mm` (mm, [1.0, 100.0]; proposal); `jog_box_mm` (mm, [0.0, 600.0]; proposal); `workspace_box_mm` (mm, [-2000.0, 2000.0]; owner); `path_dwell_s` (s, [0.0, 30.0]; proposal); `jog_idle_timeout_s` (s, [5.0, 3600.0]; proposal)
 - **Pass criteria:**
   - The session ended normally (exit code 0) (auto)
   - No reply from the controller was a Fail (auto)
@@ -640,6 +640,7 @@ Modes: `dry-run`, `mock`, `arm` (a tool that talks to the arm); `form` (a checkl
 | `jog_acc_mm_s2` | 1.6 | mm/s^2 | [10.0, 500.0] | 50.0 | proposal | store | none; half of the confirmed 100 mm/s^2 (about 0.2 mm of surface tilt at the wall, computed) |
 | `jog_max_step_mm` | 1.6 | mm | [1.0, 100.0] | 50.0 | proposal | store | none |
 | `jog_box_mm` | 1.6 | mm | [0.0, 600.0] | [200.0, 200.0, 150.0] | proposal | store | none; the safe workspace is not in the Elfin files [MISSING] |
+| `workspace_box_mm` | 1.6 | mm | [-2000.0, 2000.0] | None | owner | store | taught by the owner on the Arm control tab (corners recorded by jogging); the safe workspace is not in the Elfin files [MISSING] |
 | `jog_idle_timeout_s` | 1.6 | s | [5.0, 3600.0] | 300.0 | proposal | store | owner request (an Arm control session must not keep the arm enabled unattended) |
 | `path_dwell_s` | 1.6 | s | [0.0, 30.0] | 2.0 | proposal | store | none |
 | `payload_kg` | 2.1 | kg |  |  | measured | file:config/arm/e03pro.yaml#mounting.payload_kg | codebase §3.8 item 8 |

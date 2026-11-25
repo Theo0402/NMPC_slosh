@@ -25,14 +25,21 @@ MOCK_LIMITS = """limits_readback:
   linear_max: [1000.0, 2500.0, 10000000.0]
   tolerance: 0.001
 """
+NO_LIMITS = """limits_readback:
+  record_id: null
+  joint_max_vel_deg_s: null
+  joint_max_acc_deg_s2: null
+  joint_max_jerk_deg_s3: null
+  linear_max: null
+  tolerance: 0.001
+"""                                                    # e03pro.yaml as it was before stage 1.1 read the arm
 
 
 def temp_configs(tmp_path, limits=True, period=0.1):
     arm = (ROOT / "config/arm/e03pro.yaml").read_text(encoding="utf-8")
-    if limits:
-        start = arm.index("limits_readback:")
-        end = arm.index("\n\n", start)
-        arm = arm[:start] + MOCK_LIMITS.rstrip("\n") + arm[end:]
+    start = arm.index("limits_readback:")
+    end = arm.index("\n\n", start)
+    arm = arm[:start] + (MOCK_LIMITS if limits else NO_LIMITS).rstrip("\n") + arm[end:]
     conf = (ROOT / "config/arm/confirmed.yaml").read_text(encoding="utf-8")
     conf = conf.replace("servo_period_s: 0.2 ", f"servo_period_s: {period} ")
     arm = arm.replace("period_s: 0.2 ", f"period_s: {max(period, 0.1)} ")

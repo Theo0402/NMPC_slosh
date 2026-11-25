@@ -381,6 +381,8 @@ function labelOf(p, i) { return p.role === "start" ? "S" : p.role === "end" ? "E
 
 async function renderArm() {
   try { S.paths = await api("/api/points"); } catch (e) { S.paths = {}; }
+  try { S.ws = await api("/api/workspace"); } catch (e) { S.ws = null; }
+  S.corners = S.corners || [];
   let st;
   try { st = await api("/api/stage/arm_control"); } catch (e) { $("#pane").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
   S.armStage = st;
@@ -403,7 +405,8 @@ async function renderArm() {
         <figure><figcaption>From the side (X →, Z ↑)</figcaption><svg class="view" id="vside" viewBox="0 0 320 320"></svg></figure></div>
       <p class="pos" id="apos">—</p>
       <p class="muted">● now · <b style="color:var(--ok)">S</b> start · <b style="color:var(--accent)">1, 2…</b> middle points · <b style="color:var(--bad)">E</b> end ·
-        dashed box: how far moves may go from where the session started (jog_box_mm). Base-frame mm, as ReadActPos reports them;
+        dashed box: how far moves may go from where the session started (jog_box_mm) · <b style="color:var(--bad)">red box</b>:
+        the workspace box · <b style="color:var(--accent)">C1, C2…</b> corners being taught. Base-frame mm, as ReadActPos reports them;
         on the first step of each axis, check that the arm moves the way the arrow says.</p>
     </div></div>
     <div>
@@ -426,6 +429,17 @@ async function renderArm() {
       <p><label>Path name <input type="text" id="pname" size="14" value="${esc(S.pathName)}"></label> <button class="ghost" id="psave">Save</button>
          <label>Load <select id="pload"><option value="">—</option>${Object.keys(S.paths).map(n => `<option>${esc(n)}</option>`).join("")}</select></label></p>
       <p id="pmsg" class="muted"></p>
+    </div>
+    <div class="card"><h4>Workspace box</h4>
+      <p class="muted">The fixed area the arm's tool point may move in. Jog to the corners of the free space (at least two
+        opposite corners; more is fine) and press Record corner at each; Save keeps the box round them. From the next Connect,
+        no jog or point move may end outside it. It bounds the tool point only: teach it with the cup holder's size in mind.</p>
+      <p id="wsnow"></p>
+      <p><button class="ghost" id="wsrec">Record corner here</button> <button class="ghost" id="wsreset">Clear corners</button></p>
+      <div id="wslist"></div>
+      <p><label>Margin inside the corners <input type="number" id="wsmargin" min="0" step="1" value="${S.wsMargin || 0}" style="width:5em"> mm</label>
+         <button class="act" id="wssave">Save as workspace box</button> <button class="ghost" id="wsclear">Remove the box</button></p>
+      <p id="wsmsg" class="muted"></p>
     </div></div></div>`;
   document.querySelectorAll("[data-am]").forEach(b => b.onclick = () => { S.armMode = b.dataset.am; renderArm(); });
   document.querySelectorAll("[data-step]").forEach(b => b.onclick = () => { S.step = +b.dataset.step;
@@ -440,7 +454,49 @@ async function renderArm() {
   $("#prun").onclick = runPath;
   $("#psave").onclick = savePath;
   $("#pload").onchange = e => { const p = S.paths[e.target.value]; if (p) { S.points = p.points.map(x => ({...x})); S.pathName = p.name; $("#pname").value = p.name; updateArm(armView()); } };
+  $("#wsrec").onclick = recordCorner;
+  $("#wsreset").onclick = () => { S.corners = []; updateArm(armView()); };
+  $("#wsmargin").oninput = e => { S.wsMargin = Math.max(0, +e.target.value || 0); updateArm(armView()); };
+  $("#wssave").onclick = saveWorkspace;
+  $("#wsclear").onclick = clearWorkspace;
   updateArm(armView());
+}
+
+// ------------------------------------------------------------------ workspace box (taught by jogging)
+const fmtBox = b => b ? `X ${b[0]} to ${b[1]}, Y ${b[2]} to ${b[3]}, Z ${b[4]} to ${b[5]} mm` : "not set";
+function cornerBox() {
+  if (S.corners.length < 2) return null;
+  const m = S.wsMargin || 0, out = [];
+  for (let i = 0; i < 3; i++) {
+    const v = S.corners.map(c => c[i]);
+    out.push(+(Math.min(...v) + m).toFixed(1), +(Math.max(...v) - m).toFixed(1));
+  }
+  return out;
+}
+function recordCorner() {
+  const r = armView();
+  if (!r || !r.arm || !r.arm.pose) return msg("#wsmsg", "Connect first: corners are taken from where the arm is now.", true);
+  const p = r.arm.pose.pose;
+  S.corners.push([+p[0].toFixed(1), +p[1].toFixed(1), +p[2].toFixed(1)]);
+  msg("#wsmsg", `Corner ${S.corners.length} at X ${p[0].toFixed(1)}, Y ${p[1].toFixed(1)}, Z ${p[2].toFixed(1)} mm.`);
+  updateArm(r);
+}
+async function saveWorkspace() {
+  const b = cornerBox();
+  if (!b) return msg("#wsmsg", "Record at least two corners first (opposite corners of the free space).", true);
+  const note = prompt(`Save the workspace box ${fmtBox(b)}?\nIt applies from the next Connect. Note (kept with the version):`, "taught by jogging");
+  if (!note) return;
+  try { const res = await api("/api/workspace", {corners:S.corners, margin_mm:S.wsMargin || 0, note});
+    S.ws = await api("/api/workspace"); S.corners = [];
+    msg("#wsmsg", `Saved as coefficient version ${res.version}: ${fmtBox(res.box)}. End the session and connect again to use it.`); updateArm(armView()); }
+  catch (e) { msg("#wsmsg", e.message, true); }
+}
+async function clearWorkspace() {
+  if (!S.ws || !S.ws.box) return msg("#wsmsg", "No workspace box is saved.", true);
+  const note = prompt("Remove the workspace box? From the next Connect only the jog box limits moves. Why (kept with the version):");
+  if (!note) return;
+  try { await api("/api/workspace/clear", {note}); S.ws = await api("/api/workspace"); msg("#wsmsg", "Removed."); updateArm(armView()); }
+  catch (e) { msg("#wsmsg", e.message, true); }
 }
 
 function armView() { return S.runView && S.runView.stage === "arm_control" ? S.runView : null; }
@@ -551,7 +607,26 @@ function updateArm(r) {
     const ia = S.points.indexOf(a), ib = S.points.indexOf(b2); [S.points[ia], S.points[ib]] = [S.points[ib], S.points[ia]]; updateArm(armView()); };
   document.querySelectorAll("[data-pup]").forEach(b => b.onclick = () => move(+b.dataset.pup, -1));
   document.querySelectorAll("[data-pdn]").forEach(b => b.onclick = () => move(+b.dataset.pdn, 1));
+  updateWorkspace(r, ready);
   drawView("#vtop", 0, 1, r); drawView("#vside", 0, 2, r);
+}
+
+function updateWorkspace(r, ready) {
+  if (!$("#wsnow")) return;
+  $("#wsrec").disabled = !(ready && r.arm.pose);
+  const saved = S.ws ? S.ws.box : null, active = ready ? (r.arm.ready.settings.workspace_box_mm || null) : undefined;
+  let t = `Saved box: <b>${esc(fmtBox(saved))}</b>` + (S.ws && saved ? ` <span class="muted">(coefficient version ${S.ws.version})</span>` : "");
+  if (active !== undefined) t += JSON.stringify(active) === JSON.stringify(saved)
+    ? `<br><span class="muted">This session uses it.</span>`
+    : `<br><span class="err">${active ? `This session uses ${esc(fmtBox(active))}` : "This session has no workspace box"}:
+       the saved box applies at the next Connect.</span>`;
+  $("#wsnow").innerHTML = t;
+  const b = cornerBox();
+  $("#wslist").innerHTML = S.corners.length ? `<table><tr><th></th><th>X</th><th>Y</th><th>Z (mm)</th><th></th></tr>${S.corners.map((c, i) =>
+      `<tr><td><b>C${i + 1}</b></td><td>${c[0]}</td><td>${c[1]}</td><td>${c[2]}</td><td><button class="ghost" data-cdel="${i}">✕</button></td></tr>`).join("")}</table>
+      <p class="muted">Box from these corners${S.wsMargin ? ` less ${S.wsMargin} mm` : ""}: ${esc(fmtBox(b))}</p>`
+    : `<p class="muted">No corners recorded yet.</p>`;
+  document.querySelectorAll("[data-cdel]").forEach(x => x.onclick = () => { S.corners.splice(+x.dataset.cdel, 1); updateArm(armView()); });
 }
 
 function drawView(sel, ia, ib, r) {
@@ -560,8 +635,13 @@ function drawView(sel, ia, ib, r) {
   const ready = live && r.arm.ready, pose = live && r.arm.pose;
   const home = ready ? r.arm.ready.home : null, box = ready ? r.arm.ready.settings.jog_box_mm : null;
   const pts = ordered();
-  const c = home || (pose && pose.pose) || (pts[0] && pts[0].pose) || [0, 0, 0];
-  const H = box ? Math.max(box[ia], box[ib]) * 1.25 : 300;
+  const wsActive = ready ? r.arm.ready.settings.workspace_box_mm : (S.ws ? S.ws.box : null);
+  let c = home || (pose && pose.pose) || (pts[0] && pts[0].pose) || [0, 0, 0];
+  let H = box ? Math.max(box[ia], box[ib]) * 1.25 : 300;
+  if (wsActive) {                          // the workspace box fills the view: it is the area that matters
+    c = [0, 1, 2].map(i => (wsActive[2 * i] + wsActive[2 * i + 1]) / 2);
+    H = Math.max(30, (wsActive[2 * ia + 1] - wsActive[2 * ia]) / 2, (wsActive[2 * ib + 1] - wsActive[2 * ib]) / 2) * 1.3;
+  }
   const X = v => 160 + (v - c[ia]) / H * 140, Y = v => 160 - (v - c[ib]) / H * 140;
   const g = [10, 20, 25, 50, 100, 200, 500].find(s => H / s <= 4) || 1000;
   let h = "";
@@ -574,6 +654,13 @@ function drawView(sel, ia, ib, r) {
     h += `<rect x="${X(0) - 6}" y="${Y(0) - 6}" width="12" height="12" fill="none" stroke="var(--muted)"/><text x="${X(0) + 8}" y="${Y(0) - 8}" font-size="10" fill="var(--muted)">base</text>`;
   if (home && box) h += `<rect x="${X(home[ia] - box[ia])}" y="${Y(home[ib] + box[ib])}" width="${X(home[ia] + box[ia]) - X(home[ia] - box[ia])}"
       height="${Y(home[ib] - box[ib]) - Y(home[ib] + box[ib])}" fill="none" stroke="var(--stale)" stroke-dasharray="5 4"/>`;
+  const wsRect = (w, style) => `<rect x="${X(w[2 * ia])}" y="${Y(w[2 * ib + 1])}" width="${X(w[2 * ia + 1]) - X(w[2 * ia])}"
+      height="${Y(w[2 * ib]) - Y(w[2 * ib + 1])}" fill="none" ${style}/>`;
+  if (wsActive) h += wsRect(wsActive, `stroke="var(--bad)" stroke-width="2"`);
+  const wsNew = cornerBox();
+  if (wsNew) h += wsRect(wsNew, `stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="2 3"`);
+  (S.corners || []).forEach((cn, i) => { h += `<rect x="${X(cn[ia]) - 4}" y="${Y(cn[ib]) - 4}" width="8" height="8" fill="var(--accent)"/>
+      <text x="${X(cn[ia]) + 6}" y="${Y(cn[ib]) - 6}" font-size="9" fill="var(--accent)">C${i + 1}</text>`; });
   if (pts.length > 1) h += `<polyline fill="none" stroke="var(--muted)" stroke-dasharray="3 3" stroke-width="1.5" points="${pts.map(p => X(p.pose[ia]) + "," + Y(p.pose[ib])).join(" ")}"/>`;
   let mi = 0;
   pts.forEach(p => { const col = p.role === "start" ? "var(--ok)" : p.role === "end" ? "var(--bad)" : "var(--accent)";

@@ -13,7 +13,7 @@ address:
 robot_id: 0            # nRbtID, 0-5, default 0 (elfin_commands.md, PROTO p.17)
 
 identity:
-  model: null                # ReadRobotModel reply (PROTO p.16); the manual's example "5KG" is not expected. Read in week 1.
+  model: E03_Pro                # ReadRobotModel reply (PROTO p.16); the manual's example "5KG" is not expected. Read in week 1.
   controller_version: null   # pendant About screen (LINUX p.19); 5.51.5_EPro4ms.beta.20230522 at inspection [E03] (QC p.2-3)
 
 # What the pendant must show before enabling. The operator confirms payload and TCP at
@@ -34,11 +34,11 @@ mounting:
 # null until the bring-up read; record_id names the trial that read them. Tools that
 # enable the arm refuse while these are null, and refuse if a read differs.
 limits_readback:
-  record_id: null
-  joint_max_vel_deg_s: null      # 6 values
-  joint_max_acc_deg_s2: null     # 6 values
-  joint_max_jerk_deg_s3: null    # 6 values
-  linear_max: null               # [mm/s, mm/s^2, mm/s^3]; 3 values (the format line's 6 is [UNCLEAR], PROTO p.59)
+  record_id: 20261124-185201-bringup_read-arm
+  joint_max_vel_deg_s: [180.0, 180.0, 180.0, 180.0, 200.0, 200.0]      # 6 values
+  joint_max_acc_deg_s2: [360.0, 360.0, 360.0, 360.0, 360.0, 360.0]     # 6 values
+  joint_max_jerk_deg_s3: [3600.0, 3600.0, 3600.0, 3600.0, 3600.0, 3600.0]    # 6 values
+  linear_max: [2000.0, 2500.0, 10000.0]               # [mm/s, mm/s^2, mm/s^3]; 3 values (the format line's 6 is [UNCLEAR], PROTO p.59)
   tolerance: 0.001
 
 # Joint ranges as the pendant shows them (LINUX p.50). The protocol has no read command
