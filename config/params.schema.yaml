@@ -197,6 +197,15 @@ tunables:
     marker: owner
     from: taught by the owner by free drive at the fan's edges (2026-11-26); r_min is a clearance round the robot's own base, whose size is not in the Elfin files [MISSING]
     doc: "Workspace wedge [angle_start, angle_end, r_min, r_max, z_min, z_max] of the TCP round the base's Z axis, in the coordinates ReadActPos reports: angle = atan2(Y, X) in deg from angle_start towards increasing angle to angle_end (at most 180 deg); r = distance from the Z axis. No jog or point move may end outside it, and no straight move may pass closer to the axis than r_min (null: not set). Checked together with workspace_box_mm. The TCP only"
+  pose_dwell_s:
+    stage: pose_record
+    type: f64
+    unit: s
+    range: [0.5, 60.0]
+    default: null
+    marker: owner
+    from: owner request 2026-11-26 ("Show every position and stop for 3 sec and show the next point")
+    doc: "Pose recording: null, the operator confirms every pose. Set, the run asks once before the arm is enabled, then stops this long at each pose (the three reads included), shows it and the next pose, and goes on"
   jog_idle_timeout_s:
     stage: arm_control
     type: f64

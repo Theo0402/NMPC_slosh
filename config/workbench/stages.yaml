@@ -265,7 +265,7 @@ stages:
     files: ["config/arm/fk_poses.yaml", "config/arm/confirmed.yaml", "config/arm/e03pro.yaml#mounting", "config/arm/e03pro.yaml#joint_ranges_deg"]
     inputs:
       - "The owner's poses in config/arm/fk_poses.yaml, including single-joint moves"
-    adjust: []
+    adjust: [pose_dwell_s]
     criteria:
       all:
         text: Every pose in fk_poses.yaml recorded

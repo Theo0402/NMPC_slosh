@@ -158,6 +158,7 @@ Modes: `dry-run`, `mock`, `arm` (a tool that talks to the arm); `form` (a checkl
 - **Tool:** `tools.elfin_py.pose_recorder` (built)
 - **Requires:** 1.3 move_test
 - **Inputs:** The owner's poses in config/arm/fk_poses.yaml, including single-joint moves
+- **Adjust:** `pose_dwell_s` (s, [0.5, 60.0]; owner)
 - **Pass criteria:**
   - Every pose in fk_poses.yaml recorded (auto)
 - **Output:** trial .bin with the poses (scratch)
@@ -636,6 +637,7 @@ Modes: `dry-run`, `mock`, `arm` (a tool that talks to the arm); `form` (a checkl
 | `ladder_guard_other_joints_deg` | 1.4 | deg |  |  | proposal | code:tools.elfin_py.servo_ladder#GUARD_OTHER_JOINTS_DEG | open question Q6 |
 | `ladder_guard_j6_margin_deg` | 1.4 | deg |  |  | proposal | code:tools.elfin_py.servo_ladder#GUARD_J6_MARGIN_DEG | open question Q6 |
 | `ladder_state_stale_s` | 1.4 | s |  |  | proposal | code:tools.elfin_py.servo_ladder#STATE_STALE_S | open question Q6 |
+| `pose_dwell_s` | 1.5 | s | [0.5, 60.0] | None | owner | store | owner request 2026-11-26 ("Show every position and stop for 3 sec and show the next point") |
 | `jog_speed_mm_s` | 1.6 | mm/s | [1.0, 100.0] | 10.0 | proposal | store | none; half of the confirmed 20 mm/s |
 | `jog_acc_mm_s2` | 1.6 | mm/s^2 | [10.0, 500.0] | 50.0 | proposal | store | none; half of the confirmed 100 mm/s^2 (about 0.2 mm of surface tilt at the wall, computed) |
 | `jog_max_step_mm` | 1.6 | mm | [1.0, 100.0] | 50.0 | proposal | store | none |

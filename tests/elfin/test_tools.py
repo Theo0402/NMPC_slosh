@@ -328,3 +328,22 @@ def test_owner_ladder_profile_is_within_the_starting_values():
     assert samples[0] == samples[-1] == sim.MOCK_HOME_DEG
     # the tapers add w'(t) sin terms: 4.11 deg/s and 7.74 deg/s^2, vs 3.14 and 1.97 for the plain sine
     assert abs(rep["peak_speed_deg_s"] - 4.114) < 0.01 and abs(rep["peak_acc_deg_s2"] - 7.740) < 0.01
+
+
+def test_pose_recorder_dwell_asks_once_and_stops_at_each_pose(tmp_path, mock, monkeypatch, capsys):
+    import json
+    poses = tmp_path / "poses.yaml"
+    poses.write_text("poses:\n  - [0.0, 0.0, 90.0, 0.0, 90.0, 5.0]\n  - [5.0, 0.0, 90.0, 0.0, 90.0, 5.0]\n", encoding="utf-8")
+    snap = tmp_path / "coeffs.json"
+    snap.write_text(json.dumps({"version": 9, "values": {"pose_dwell_s": {"value": 1.0}}}), encoding="utf-8")
+    monkeypatch.setenv("SLOSH_WB_COEFFS", str(snap))
+    ranges = "[[-360.0, 360.0], [-135.0, 135.0], [-153.0, 153.0], [-360.0, 360.0], [-180.0, 180.0], [-360.0, 360.0]]"
+    t0 = time.monotonic()
+    assert pose_recorder.main(mock_args(mock) + configs(tmp_path, ranges=ranges) + ["--poses", str(poses)]) == 0
+    assert time.monotonic() - t0 >= 2.0                       # 1 s at each of the 2 poses
+    out = capsys.readouterr().out
+    assert "next: pose 2/2" in out and "Run all 2 poses" in out
+    t = only_trial(tmp_path)
+    texts = [e["text"].decode() for e in t.stream("event")]
+    assert not any("Move to pose 2/2" in s for s in texts)    # no question between the poses
+    assert names(t).count("WayPoint") == 2

@@ -13,6 +13,10 @@ orientations once the Rx, Ry, Rz convention is established.
 The question for pose 1 comes before GrpEnable. The later ones are asked with the arm enabled, so no
 answer within QUESTION_TIMEOUT_S is taken as no: the run ends and GrpDisable is sent (pre-hardware
 review S9). In a Windows terminal the timeout does not apply (arm runs are Linux only).
+
+With the coefficient pose_dwell_s set (owner request, 2026-11-26), the run asks once, before GrpEnable, for the
+whole list; then it stops pose_dwell_s at each pose (the reads included), prints that pose and the next one, and
+goes on without further questions. The e-stop and the stop button end it as before.
 """
 import sys
 import time
@@ -43,18 +47,27 @@ def main(argv=None):
         motion.check_waypoint("joint", v, a, confirmed)
         m = arm_cfg["mounting"]
         records = []
+        entry = (cli.workbench_block().get("coeffs") or {}).get("pose_dwell_s")
+        dwell = entry.get("value") if isinstance(entry, dict) else entry
+        if dwell is not None and not 0.5 <= float(dwell) <= 60.0:
+            raise link.Refused(f"pose_dwell_s {dwell} s: allowed 0.5 to 60 s")
+        log.event(triallog.EV_INFO, {"pose_dwell_s": dwell})
 
         def question(n, target):
             return f"Move to pose {n}/{len(poses)}: {target} deg?"
 
         def first_pose():
-            if not ask(question(1, poses[0])):
+            q = question(1, poses[0])
+            if dwell is not None:
+                q = (f"Run all {len(poses)} poses without a question between them, stopping {float(dwell):g} s at "
+                     f"each (pose_dwell_s)? Pose 1: {poses[0]} deg.")
+            if not ask(q):
                 raise link.Refused("operator stopped before pose 1")
 
         with arm.disable_on_exit():
             arm.prepare_and_enable(arm_cfg, ask, before_enable=first_pose)
             for n, target in enumerate(poses, 1):
-                if n > 1 and not ask(question(n, target) + f" (The arm is enabled: no answer within "
+                if n > 1 and dwell is None and not ask(question(n, target) + f" (The arm is enabled: no answer within "
                                      f"{QUESTION_TIMEOUT_S / 60:g} min is taken as no and ends the run.)",
                                      timeout=QUESTION_TIMEOUT_S):
                     raise link.Refused(f"operator stopped before pose {n}")
@@ -64,13 +77,18 @@ def main(argv=None):
                 arm.cmd("WayPoint", 0, *pose, *[float(x) for x in target], m["tcp_name"], m["ucs_name"],
                         float(v), float(a), 0.0, 0, 1, 0, 0, 0, f"P{n}")
                 arm.wait_done(joints=[float(x) for x in target])   # never a pose read mid-move (review S12)
+                t_arrived = time.monotonic()
                 time.sleep(0.5)
                 reads = [arm.act_pos() for _ in range(3)]
                 rec = {"pose": n, "target_deg": target, "reads": [{"joints": r[0], "pose": r[1], "tool": r[2],
                                                                     "user": r[3]} for r in reads]}
                 records.append(rec)
                 log.event(triallog.EV_INFO, rec)
-                print(f"pose {n}: joints {reads[-1][0]}\n        pose   {reads[-1][1]}")
+                print(f"pose {n}: joints {reads[-1][0]}\n        pose   {reads[-1][1]}", flush=True)
+                if dwell is not None:
+                    time.sleep(max(0.0, float(dwell) - (time.monotonic() - t_arrived)))
+                    if n < len(poses):
+                        print(f"next: pose {n + 1}/{len(poses)}: {poses[n]} deg", flush=True)
         log.event(triallog.EV_SUMMARY, {"poses": records})
         return 0
 
