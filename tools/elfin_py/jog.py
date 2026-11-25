@@ -21,6 +21,15 @@ stays inside it. If the arm is outside the box when a move is asked for, a move 
 outside on any axis (so the operator can bring it back in); a path's points must all be inside. The box bounds the
 TCP point only: the cup holder's size and the elbow are not checked, so teach the corners with that in mind.
 
+Workspace fan (owner request, 2026-11-26): workspace_fan = [angle_start, angle_end, r_min, r_max, z_min, z_max] is a
+wedge round the base's Z axis in the same coordinates: the angle atan2(Y, X) in degrees, counted from angle_start
+towards increasing angle up to angle_end (at most 180 deg, so the wedge itself is convex); r = the distance from the
+Z axis in mm, from r_min (a clearance round the robot's own base) to r_max; Z from z_min to z_max. Taught by free
+drive at the fan's edges. It is checked as well as the box (either may be unset). Because of the clearance round
+the base, a straight move between two points inside can cut through it, so the whole straight path is checked
+against r_min, not only its end. An arm outside the fan may only move no further outside on any measure, and its
+path may not come closer to the Z axis than r_min or where it already is. The TCP point only, as for the box.
+
 The stop button (or a dead workbench) during a move sends GrpStop (PROTO p.20; what it does on this arm
 is [UNTESTED]), waits for the arm to settle, and ends the session. Any other error during a move (no reply,
 a protocol or socket error) ends the session the same way: the exit sequence sends GrpStop before GrpDisable
@@ -52,7 +61,7 @@ FIRST_RUN = ("Jog moves are linear, at the jog speed (10 mm/s by default), orien
              "moves the wrong way, rotates the cup, or keeps going.")
 DEFAULTS = {"jog_speed_mm_s": 10.0, "jog_acc_mm_s2": 50.0, "jog_max_step_mm": 50.0,
             "jog_box_mm": [200.0, 200.0, 150.0], "path_dwell_s": 2.0,
-            "jog_idle_timeout_s": 300.0, "workspace_box_mm": None}            # as config/params.schema.yaml
+            "jog_idle_timeout_s": 300.0, "workspace_box_mm": None, "workspace_fan": None}   # as params.schema.yaml
 AXES = {"x": 0, "y": 1, "z": 2}
 ORIENT_TOL_DEG = 0.5
 IDLE_POLL_S = 0.5
@@ -110,6 +119,17 @@ def check_settings(s):
                     problems.append(f"workspace_box_mm: {name} min {ws[2 * i]} must be below {name} max {ws[2 * i + 1]}")
         except CommandRefused as exc:
             problems.append(str(exc))
+    if s.get("workspace_fan") is not None:
+        try:
+            a0, a1, r0, r1, z0, z1 = _vector(s["workspace_fan"], "workspace_fan", 6)
+            if not 0.0 < fan_span(a0, a1) <= 180.0:
+                problems.append(f"workspace_fan: the angle from {a0} to {a1} deg must be more than 0 and at most 180 deg")
+            if not 0.0 <= r0 < r1:
+                problems.append(f"workspace_fan: r_min {r0} must be at least 0 and below r_max {r1}")
+            if not z0 < z1:
+                problems.append(f"workspace_fan: z_min {z0} must be below z_max {z1}")
+        except CommandRefused as exc:
+            problems.append(str(exc))
     if problems:
         raise link.Refused("the Arm control settings are not usable: " + "; ".join(problems) +
                            " (the Coefficients tab)")
@@ -149,6 +169,55 @@ def check_workspace(ws, target, now_xyz=None):
                                                         "allowed" if any(out_n) else ""))
 
 
+def fan_span(a0, a1):
+    """Degrees from angle_start to angle_end, counted towards increasing angle (0 < span <= 360)."""
+    span = (a1 - a0) % 360.0
+    return 360.0 if span == 0.0 else span
+
+
+def fan_outside_by(fan, xyz):
+    """How far a point lies outside the fan on each measure (0 inside): [angle deg, r below r_min, r above r_max,
+    z below z_min, z above z_max], the last four in mm."""
+    a0, a1, r0, r1, z0, z1 = fan
+    r = math.hypot(xyz[0], xyz[1])
+    rel = (math.degrees(math.atan2(xyz[1], xyz[0])) - a0) % 360.0
+    span = fan_span(a0, a1)
+    ang = 0.0 if rel <= span + 1e-9 else min(rel - span, 360.0 - rel)
+    return [ang, max(r0 - r, 0.0), max(r - r1, 0.0), max(z0 - xyz[2], 0.0), max(xyz[2] - z1, 0.0)]
+
+
+def closest_to_axis(p, q):
+    """The smallest distance from the Z axis along the straight XY path from p to q, in mm."""
+    dx, dy = q[0] - p[0], q[1] - p[1]
+    d2 = dx * dx + dy * dy
+    t = 0.0 if d2 == 0.0 else max(0.0, min(1.0, -(p[0] * dx + p[1] * dy) / d2))
+    return math.hypot(p[0] + t * dx, p[1] + t * dy)
+
+
+def check_fan(fan, target, now_xyz=None, inside=False):
+    """Refuse a move that ends outside the workspace fan, or whose straight path from now_xyz comes closer to the Z
+    axis than r_min (or than the arm already is). A target outside is allowed only if it is no further outside on any
+    measure than now_xyz, so an arm outside the fan can be brought back in; inside=True (path points) allows none."""
+    if fan is None:
+        return
+    names = ("angle", "distance from the base axis (below r_min)", "distance from the base axis (above r_max)",
+             "Z (below z_min)", "Z (above z_max)")
+    units = ("deg", "mm", "mm", "mm", "mm")
+    out_t = fan_outside_by(fan, target)
+    out_n = fan_outside_by(fan, now_xyz) if now_xyz is not None and not inside else [0.0] * 5
+    for i in range(5):
+        if out_t[i] > out_n[i] + 1e-6:
+            raise CommandRefused(f"the target is {out_t[i]:.1f} {units[i]} outside the workspace fan in {names[i]} "
+                                 f"(workspace_fan {list(fan)})" + ("; the arm is outside it now, so only moves back "
+                                                                   "towards it are allowed" if any(out_n) else ""))
+    if now_xyz is not None:
+        floor = min(fan[2], math.hypot(now_xyz[0], now_xyz[1]), math.hypot(target[0], target[1]))
+        low = closest_to_axis(now_xyz, target)
+        if low < floor - 1e-6:
+            raise CommandRefused(f"the straight path passes {low:.1f} mm from the base axis, inside the fan's "
+                                 f"clearance of {fan[2]:.1f} mm (workspace_fan r_min); go round in two moves")
+
+
 class Session:
     def __init__(self, arm, log, chan, mounting, s):
         self.arm, self.log, self.chan, self.m, self.s = arm, log, chan, mounting, s
@@ -169,10 +238,12 @@ class Session:
         return p
 
     def check_target(self, target, now, inside=False):
-        """inside=True: the target must be inside the workspace box even if the arm is outside it now (paths)."""
+        """inside=True: the target must be inside the workspace box and fan even if the arm is outside them now
+        (paths; now is then the path's previous point, so each leg's straight path is checked too)."""
         if self.home is None:
             raise CommandRefused("the session has not started")
         check_workspace(self.s.get("workspace_box_mm"), target, None if inside else now["pose"][:3])
+        check_fan(self.s.get("workspace_fan"), target, now["pose"][:3], inside)
         box = self.s["jog_box_mm"]
         for i, name in enumerate("XYZ"):
             if abs(target[i] - self.home[i]) > box[i] + 1e-9:
@@ -242,8 +313,10 @@ class Session:
                 raise CommandRefused(f"dwell_s {dwell} s: must not be negative")
             now = self.read()
             targets = [self.point_target(p, now) for p in points]
-            for t in targets:                            # check every point before the first move
-                self.check_target(t, now, inside=True)
+            prev = now
+            for t in targets:                            # check every point, and every leg, before the first move
+                self.check_target(t, prev, inside=True)
+                prev = dict(now, pose=list(t[:3]) + list(now["pose"][3:]))
             for k, (p, t) in enumerate(zip(points, targets), 1):
                 self.chan.emit("progress", id=cid, step=k, of=len(points), point=p.get("name"))
                 self.move_to(t, f"{cid}.{k}")

@@ -151,7 +151,8 @@ def cmd_status(a):
         print(f"arm control: {state};  {fmt_pose(arm.get('pose'))}")
         if arm.get("ready"):
             s = arm["ready"]["settings"]
-            print(f"  jog box ±{s['jog_box_mm']} mm round the start; workspace box {s.get('workspace_box_mm')}")
+            print(f"  jog box ±{s['jog_box_mm']} mm round the start; workspace box {s.get('workspace_box_mm')}; "
+                  f"workspace fan {s.get('workspace_fan')}")
     show_questions(r)
     return 0
 
