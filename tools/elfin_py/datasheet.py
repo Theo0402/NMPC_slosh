@@ -7,6 +7,11 @@ strings and a trailing comma after "nAxisGroupErrorCode":[0] (PROTO p.185-186); 
 real controller does the same is [UNTESTED]. There is no timestamp, so each packet is
 stamped on arrival with time.monotonic_ns() (codebase plan §5).
 
+Measured on the E03-Pro (2026-11-25, run 20261125-151500-state_stream-arm): the marker arrives as the
+bytes "LTBR", i.e. "RBTL" written as a little-endian 32-bit word, and the lengths are little-endian
+(header 4c544252 380b0000 2c0b0000: total 2872 = data 2860 + 12). Both spellings are accepted; the
+byte order is still chosen by total = data + 12.
+
 Standard library only.
 """
 import json
@@ -17,6 +22,7 @@ import struct
 import time
 
 _TRAILING_COMMA = re.compile(rb",\s*([}\]])")
+MARKERS = (b"RBTL", b"LTBR")   # the manual's spelling (PROTO p.188); the arm's, measured 2026-11-25
 
 
 class DatasheetError(ValueError):
@@ -27,7 +33,7 @@ def split_header(head):
     """12 header bytes -> (total, data_length, byte_order)."""
     if len(head) != 12:
         raise DatasheetError(f"short header: {head.hex()}")
-    if head[:4] != b"RBTL":
+    if head[:4] not in MARKERS:
         raise DatasheetError(f"no RBTL marker: {head.hex()}")
     for order in "<>":
         total, n = struct.unpack(order + "II", head[4:])

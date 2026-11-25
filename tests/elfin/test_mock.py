@@ -117,6 +117,14 @@ def test_injected_error_stops_streaming(mock_factory):
         assert st["nErrorState"] == 1 and st["nErrorAxis"] == 5
 
 
+def test_datasheet_header_as_measured_on_the_arm():
+    """The first header the E03-Pro sent (2026-11-25, run 20261125-151500-state_stream-arm)."""
+    assert datasheet.split_header(bytes.fromhex("4c544252380b00002c0b0000")) == (2872, 2860, "<")
+    assert datasheet.split_header(b"RBTL" + bytes.fromhex("00000b3800000b2c")) == (2872, 2860, ">")
+    with pytest.raises(datasheet.DatasheetError, match="marker"):
+        datasheet.split_header(b"XXXX" + bytes.fromhex("380b00002c0b0000"))
+
+
 @pytest.mark.parametrize("order", ["<", ">"])
 def test_datasheet_quirks_and_byte_order(mock_factory, order):
     srv = mock_factory(datasheet_byte_order=order)
@@ -131,6 +139,7 @@ def test_datasheet_quirks_and_byte_order(mock_factory, order):
     assert b'"nAxisGroupErrorCode":[0],}' in raw                     # the manual's trailing comma
     assert isinstance(d["PosAndVel"]["Actual_Position"][0], str)     # string numbers
     assert rd.byte_orders == {order}
+    assert raw[:4] == (b"LTBR" if order == "<" else b"RBTL")        # the marker as the arm sends it
     st = datasheet.parse_state(d)
     assert abs(st["q_rad"][2] - 3.14159265 / 2) < 1e-6 and st["state"]["robotEnabled"] == 0
     assert "StateAndError.robotEnabled" in datasheet.key_tree(d)

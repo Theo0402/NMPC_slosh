@@ -454,7 +454,9 @@ class MockArm:
         se_text = json.dumps(se, separators=(",", ":"))[:-1] + ',"nAxisGroupErrorCode":[0],}'
         body = ('{"PosAndVel":' + json.dumps(pv, separators=(",", ":")) + ',"StateAndError":' + se_text
                 + ',"HardLoad":' + json.dumps(hl, separators=(",", ":")) + "}").encode("utf-8")
-        head = b"RBTL" + struct.pack(self.cfg.datasheet_byte_order + "II", len(body) + 12, len(body))
+        # the marker goes out as a 32-bit word in the stream's byte order, as the arm sends it: "LTBR" for "<"
+        # (measured 2026-11-25, tools/elfin_py/datasheet.py), "RBTL" for ">"
+        head = struct.pack(self.cfg.datasheet_byte_order + "III", 0x5242544C, len(body) + 12, len(body))
         return head + body
 
 
