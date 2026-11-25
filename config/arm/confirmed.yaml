@@ -19,5 +19,5 @@ linear_speed_mm_s: 20.0          # WayPoint linear moves (dVelocity)
 linear_acc_mm_s2: 100.0          # WayPoint linear moves (dAcc)
 stream_joint_speed_deg_s: 20.0   # peak joint speed of a streamed trajectory
 stream_joint_acc_deg_s2: 100.0   # peak joint acceleration of a streamed trajectory
-servo_period_s: 0.1              # shortest confirmed dServoTime (StartServo, PROTO p.172)
+servo_period_s: 0.05              # shortest confirmed dServoTime (StartServo, PROTO p.172)
 servo_lookahead_s: 0.02          # dLookaheadTime (StartServo, PROTO p.172)
