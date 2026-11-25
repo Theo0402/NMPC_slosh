@@ -22,7 +22,7 @@ identity:
 # holder + cup + water, centre of mass in the flange frame found by the jog test; TCP = cup
 # axis at rim height, taught as CUPRIM; then tcp_name becomes CUPRIM and tool_frame its values.
 mounting:
-  description: bare flange
+  description: "holder Rev F.3 on, no cup; payload from the CAD, no weighing (open_questions Q22); the pendant still has 0 kg until it is entered"
   payload_kg: 0.0
   tcp_name: TCP              # sTcpName for WayPoint (PROTO p.137-139); default tool frame (PROTO p.2)
   ucs_name: Base             # sUcsName; default user frame (PROTO p.2)

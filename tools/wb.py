@@ -12,14 +12,16 @@
     python -m tools.wb accept RUN_ID --note TEXT [CHECK=yes ...]
     python -m tools.wb coeff NAME=VALUE ... --note TEXT
 Arm control (a running arm_control session):
-    python -m tools.wb pose | jog AXIS MM | goto X Y Z | keep | end
+    python -m tools.wb pose | jog AXIS MM | tilt DEG | roll DEG | goto X Y Z | keep | end
     python -m tools.wb corner | corners [--clear] | ws | ws-save --note TEXT [--margin MM] | ws-clear --note TEXT
 
 It only talks to the workbench's API on 127.0.0.1 (tools/workbench/server.py), exactly as the page does: every check,
 lock, refusal, question, run folder and journal line stays the workbench's. It never answers a question by itself.
 MODE is dry-run, mock or arm (analysis for stages such as 0.1 host_check; forms use "form"); jog takes a signed step,
 e.g. "jog z -5". goto moves in a straight line to X Y Z with the
-orientation held (the jog tool refuses anything outside the jog box or the workspace box).
+orientation held (the jog tool refuses anything outside the jog box or the workspace box). tilt raises (+) or
+lowers (-) the J6 axis in place, e.g. "tilt 3.2"; pose shows the J6 axis's angle from level. roll turns about the
+J6 axis in place, + counterclockwise seen from in front of the flange.
 """
 import argparse
 import json
@@ -119,7 +121,10 @@ def fmt_pose(p):
     if not p or not p.get("pose"):
         return "pose unknown"
     x = p["pose"]
-    return f"X {x[0]:.1f}  Y {x[1]:.1f}  Z {x[2]:.1f} mm   Rx {x[3]:.1f}  Ry {x[4]:.1f}  Rz {x[5]:.1f} deg"
+    import math                                       # J6 axis = tool +z; its up part is cos(Ry)cos(Rx) (F2)
+    up = math.cos(math.radians(x[4])) * math.cos(math.radians(x[3]))
+    return (f"X {x[0]:.1f}  Y {x[1]:.1f}  Z {x[2]:.1f} mm   Rx {x[3]:.2f}  Ry {x[4]:.2f}  Rz {x[5]:.2f} deg   "
+            f"J6 axis {math.degrees(math.asin(max(-1.0, min(1.0, up)))):+.2f} deg from level")
 
 
 def show_questions(r):
@@ -303,6 +308,16 @@ def cmd_jog(a):
     return 0
 
 
+def cmd_turn(name):
+    def run(a):
+        deg = float(a.deg)
+        if deg == 0:
+            raise WbError(f"a {name} of 0 deg")
+        send(name, {"deg": deg})
+        return 0
+    return run
+
+
 def cmd_goto(a):
     p = arm_ready()["arm"]["pose"]
     pose = [float(a.x), float(a.y), float(a.z)] + list(p["pose"][3:])
@@ -414,6 +429,10 @@ def main(argv=None):
     p.add_argument("axis", choices=["x", "y", "z", "X", "Y", "Z"])
     p.add_argument("mm")
     p.set_defaults(fn=cmd_jog)
+    for name in ("tilt", "roll"):
+        p = sub.add_parser(name)
+        p.add_argument("deg")
+        p.set_defaults(fn=cmd_turn(name))
     p = sub.add_parser("goto")
     for k in "xyz":
         p.add_argument(k)

@@ -195,3 +195,107 @@ def test_every_question_comes_before_the_arm_is_enabled(bench):
     asked = [i for i, (s, r) in order if s == "event" and r["text"].decode().startswith("prompt")]
     enable = [i for i, (s, r) in order if s == "wire_tx" and r["data"].startswith(b"GrpEnable")]
     assert len(asked) == 2 and len(enable) == 1 and max(asked) < enable[0]
+
+
+ARM_POSE = [-325.5, -308.2, 133.0, -98.22, 67.23, 130.02]   # the arm on 2026-11-26: J6 axis 3.2 deg below level
+
+
+def _col(R, j):
+    return [R[i][j] for i in range(3)]
+
+
+def test_tilt_levels_j6_in_place_keeping_heading_and_turn():
+    import math
+    R0 = jog.rot_from_rpy(*ARM_POSE[3:])
+    assert jog.rpy_from_rot(R0) == pytest.approx(ARM_POSE[3:])
+    e0 = jog.j6_elevation(ARM_POSE)
+    assert e0 == pytest.approx(-3.17, abs=0.01)
+    for d in (-e0, 2.0, -4.0):
+        p = jog.tilted(ARM_POSE, d)
+        assert p[:3] == ARM_POSE[:3]
+        assert jog.j6_elevation(p) == pytest.approx(e0 + d, abs=1e-9)
+        R = jog.rot_from_rpy(*p[3:])
+        z0, z = _col(R0, 2), _col(R, 2)
+        assert math.atan2(z[1], z[0]) == pytest.approx(math.atan2(z0[1], z0[0]), abs=1e-12)   # same heading
+        up = lambda R: math.atan2(R[2][1], R[2][0])           # where "up" lies on the flange face (tool x-y)
+        assert up(R) == pytest.approx(up(R0), abs=1e-12)        # the cup's turn about J6 is unchanged
+    with pytest.raises(jog.CommandRefused, match="from level"):
+        jog.tilted([420.0, 0.0, 445.0, 180.0, 0.0, 180.0], 1.0)  # the mock's pose: J6 straight down
+
+
+class _FakeArm:
+    def __init__(self, pose):
+        self.pose, self.sent = list(pose), []
+
+    def act_pos(self):
+        return [0.0] * 6, list(self.pose), [0.0] * 6, [0.0] * 6
+
+    def check_before_motion(self):
+        pass
+
+    def cmd(self, name, *args):
+        self.sent.append((name, args))
+        self.pose = list(args[1:7])
+
+    def wait_done(self, timeout, pose):
+        self.timeout = timeout
+
+
+class _Quiet:
+    def event(self, *a, **k):
+        pass
+
+    emit = event
+
+
+def test_tilt_sends_one_slow_linear_waypoint_to_the_same_point():
+    arm = _FakeArm(ARM_POSE)
+    m = {"tcp_name": "TCP", "ucs_name": "Base", "tool_frame": [0.0] * 6, "user_frame": [0.0] * 6}
+    s = jog.Session(arm, _Quiet(), _Quiet(), m, dict(jog.DEFAULTS))
+    s.home = list(ARM_POSE)
+    for bad in (0, 6, "x"):
+        with pytest.raises(jog.CommandRefused):
+            s.handle({"name": "tilt", "args": {"deg": bad}, "id": "t"})
+    assert arm.sent == []
+    s.handle({"name": "tilt", "args": {"deg": 3.17}, "id": "t1"})
+    (name, a), = arm.sent
+    assert name == "WayPoint" and list(a[1:4]) == ARM_POSE[:3]
+    assert a[18] == 1 and (a[15], a[16]) == (jog.TILT_SPEED_DEG_S, jog.TILT_ACC_DEG_S2)   # linear, 2 deg/s
+    assert abs(jog.j6_elevation(arm.pose)) < 0.01
+    assert arm.timeout >= 14.0 + 5                               # the arm took 14.0 s for this tilt
+    with pytest.raises(jog.CommandRefused, match="rotate"):      # jogs still hold the (new) orientation
+        s.check_target(ARM_POSE, {"pose": arm.pose})
+
+
+def test_tilt_is_refused_on_the_mock_pose_and_the_session_goes_on(bench):
+    connect(bench)
+    r = do(bench, "tilt", {"deg": 2})
+    assert not r["ok"] and "from level" in r["error"]
+    assert bench.run.running and do(bench, "jog", {"axis": "z", "dir": 1, "step_mm": 1})["ok"]
+    do(bench, "end", {})
+    trial = finish(bench)
+    assert len([s for s in sent(trial) if s.startswith("WayPoint")]) == 1
+
+
+def test_roll_turns_about_j6_in_place():
+    import math
+    up = lambda p: math.degrees(math.atan2(*(lambda R: (R[2][1], R[2][0]))(jog.rot_from_rpy(*p[3:]))))
+    level = jog.tilted(ARM_POSE, -jog.j6_elevation(ARM_POSE))
+    for d in (3.0, -4.5):
+        p = jog.rolled(level, d)
+        assert p[:3] == level[:3]
+        assert _col(jog.rot_from_rpy(*p[3:]), 2) == pytest.approx(_col(jog.rot_from_rpy(*level[3:]), 2), abs=1e-12)
+        assert up(p) == pytest.approx(up(level) - d, abs=1e-9)     # "up" seen from the flange moves the other way
+
+
+def test_roll_on_the_mock_is_one_slow_linear_waypoint(bench):
+    home = connect(bench)
+    assert not do(bench, "roll", {"deg": 6})["ok"]
+    assert do(bench, "roll", {"deg": 2})["ok"]
+    pose = bench.run.arm["pose"]["pose"]
+    assert pose[:3] == pytest.approx(home["pose"][:3])
+    assert _col(jog.rot_from_rpy(*pose[3:]), 2) == pytest.approx(_col(jog.rot_from_rpy(*home["pose"][3:]), 2), abs=1e-6)
+    do(bench, "end", {})
+    trial = finish(bench)
+    (m,) = [s.split(",") for s in sent(trial) if s.startswith("WayPoint")]
+    assert m[19] == "1" and float(m[16]) == jog.TILT_SPEED_DEG_S and m[2:5] == [f"{v:.4f}" for v in home["pose"][:3]]

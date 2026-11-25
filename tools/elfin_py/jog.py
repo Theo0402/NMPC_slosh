@@ -40,8 +40,21 @@ ends by itself and GrpDisable is sent, so the arm is never left enabled with nob
 carries the seconds left; the page warns in the last minute and offers "Keep connected" (the keep command). All of
 the session's questions are asked before the arm is enabled, so an unanswered question never leaves it enabled.
 
+Tilt (owner request, 2026-11-26): the one move that turns the orientation. It raises (+) or lowers (-) the J6 axis by
+up to TILT_MAX_DEG about the level axis at right angles to J6, through the TCP: the TCP stays put, the J6 axis keeps
+its heading and the cup keeps its turn about J6. One linear WayPoint to the same position at TILT_SPEED_DEG_S
+(rotations in deg/s, PROTO p.137-139). How the controller times a pure turn is [UNCLEAR]: measured slower than
+planned (TILT_TIME_FACTOR), so the wait allows three times the planned time. Only while the J6 axis is
+within TILT_MAX_ELEVATION_DEG of level. The pose convention is the one measured on the arm (open_questions F2).
+Recorded points keep their old orientation, so after a tilt they are refused until recorded again.
+Roll (owner request, 2026-11-26, to level the cup about J6): the same kind of move, a turn by up to TILT_MAX_DEG about
+the J6 axis itself through the TCP (+ = counterclockwise seen from in front of the flange); the J6 axis keeps its
+direction. Any J6 angle.
+
 Commands on the channel ({"type": "cmd", "id", "name", "args"}):
     jog   {"axis": "x"|"y"|"z", "dir": 1|-1, "step_mm": float}
+    tilt  {"deg": float}                                  + raises the J6 axis, - lowers it
+    roll  {"deg": float}                                  turn about J6, + counterclockwise seen from the front
     goto  {"point": {"name", "pose": [6], "tool": [6], "user": [6]}}
     path  {"points": [point, ...], "dwell_s": float}      current pose -> each point in turn
     keep  {}                                              no motion: restarts the idle timer
@@ -64,6 +77,12 @@ DEFAULTS = {"jog_speed_mm_s": 10.0, "jog_acc_mm_s2": 50.0, "jog_max_step_mm": 50
             "jog_idle_timeout_s": 300.0, "workspace_box_mm": None, "workspace_fan": None}   # as params.schema.yaml
 AXES = {"x": 0, "y": 1, "z": 2}
 ORIENT_TOL_DEG = 0.5
+TILT_MAX_DEG = 5.0              # one tilt command at most [proposal]
+TILT_MAX_ELEVATION_DEG = 45.0   # tilt only while the J6 axis is this close to level [proposal]
+TILT_SPEED_DEG_S = 2.0          # a tilt's turn rate: WayPoint linear, rotations in deg/s (PROTO p.137-139) [proposal]
+TILT_ACC_DEG_S2 = 10.0
+TILT_TIME_FACTOR = 3.0          # wait allowance: on 2026-11-26 a 3.2 deg tilt (8.3 deg of Euler change) took 14.0 s at
+                                # speed override 0.50, peak joint speed 0.43 deg/s (trial 20261125-214030-jog-arm)
 IDLE_POLL_S = 0.5
 
 
@@ -218,6 +237,56 @@ def check_fan(fan, target, now_xyz=None, inside=False):
                                  f"clearance of {fan[2]:.1f} mm (workspace_fan r_min); go round in two moves")
 
 
+def rot_from_rpy(rx, ry, rz):
+    """R = Rz(Rz)·Ry(Ry)·Rx(Rx), degrees: the convention of ReadActPos's pose, measured on the arm
+    (open_questions F2). The tool frame's +z (third column) is the J6 axis, pointing out of the flange."""
+    a, b, c = (math.radians(v) for v in (rx, ry, rz))
+    ca, sa, cb, sb, cc, sc = math.cos(a), math.sin(a), math.cos(b), math.sin(b), math.cos(c), math.sin(c)
+    return [[cc * cb, cc * sb * sa - sc * ca, cc * sb * ca + sc * sa],
+            [sc * cb, sc * sb * sa + cc * ca, sc * sb * ca - cc * sa],
+            [-sb, cb * sa, cb * ca]]
+
+
+def rpy_from_rot(R):
+    return [math.degrees(math.atan2(R[2][1], R[2][2])),
+            math.degrees(math.atan2(-R[2][0], math.hypot(R[0][0], R[1][0]))),
+            math.degrees(math.atan2(R[1][0], R[0][0]))]
+
+
+def j6_elevation(pose):
+    """The J6 axis's angle above level (+) or below (-), in degrees."""
+    return math.degrees(math.asin(max(-1.0, min(1.0, rot_from_rpy(*pose[3:6])[2][2]))))
+
+
+def tilted(pose, deg):
+    """The pose with the J6 axis raised by deg (lowered if negative): a turn about the level axis at right angles
+    to J6, through the TCP. The position stays, the J6 axis keeps its heading, and the cup's turn about J6 stays."""
+    R = rot_from_rpy(*pose[3:6])
+    dx, dy, dz = R[0][2], R[1][2], R[2][2]
+    h = math.hypot(dx, dy)
+    if h < math.cos(math.radians(TILT_MAX_ELEVATION_DEG)):
+        raise CommandRefused(f"the J6 axis is {j6_elevation(pose):.1f} deg from level: tilt works only within "
+                             f"{TILT_MAX_ELEVATION_DEG:g} deg of level")
+    kx, ky = -dy / h, dx / h                       # level, at right angles to J6; a + turn about it lowers J6
+    t = math.radians(-deg)
+    c, s = math.cos(t), math.sin(t)
+    K = [[0.0, 0.0, ky], [0.0, 0.0, -kx], [-ky, kx, 0.0]]
+    K2 = [[sum(K[i][m] * K[m][j] for m in range(3)) for j in range(3)] for i in range(3)]
+    Q = [[(i == j) + s * K[i][j] + (1 - c) * K2[i][j] for j in range(3)] for i in range(3)]
+    R2 = [[sum(Q[i][m] * R[m][j] for m in range(3)) for j in range(3)] for i in range(3)]
+    return list(pose[:3]) + rpy_from_rot(R2)
+
+
+def rolled(pose, deg):
+    """The pose turned by deg about the J6 axis (tool +z, right-handed: seen from in front of the flange, looking at
+    the robot, + is counterclockwise), through the TCP. The J6 axis keeps its direction."""
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    R = rot_from_rpy(*pose[3:6])
+    R2 = [[R[i][0] * c + R[i][1] * s, -R[i][0] * s + R[i][1] * c, R[i][2]] for i in range(3)]
+    return list(pose[:3]) + rpy_from_rot(R2)
+
+
 class Session:
     def __init__(self, arm, log, chan, mounting, s):
         self.arm, self.log, self.chan, self.m, self.s = arm, log, chan, mounting, s
@@ -237,9 +306,10 @@ class Session:
         self.chan.emit(kind, moving=self.moving, home=self.home, idle_left_s=round(self.idle_left(), 1), **p)
         return p
 
-    def check_target(self, target, now, inside=False):
+    def check_target(self, target, now, inside=False, turn=False):
         """inside=True: the target must be inside the workspace box and fan even if the arm is outside them now
-        (paths; now is then the path's previous point, so each leg's straight path is checked too)."""
+        (paths; now is then the path's previous point, so each leg's straight path is checked too).
+        turn=True (tilt): the orientation may change, the position may not."""
         if self.home is None:
             raise CommandRefused("the session has not started")
         check_workspace(self.s.get("workspace_box_mm"), target, None if inside else now["pose"][:3])
@@ -249,29 +319,36 @@ class Session:
             if abs(target[i] - self.home[i]) > box[i] + 1e-9:
                 raise CommandRefused(f"{name} {target[i]:.1f} mm is {abs(target[i] - self.home[i]):.1f} mm from where the "
                                      f"session started; the jog box allows {box[i]:.0f} mm (jog_box_mm)")
+        if turn:
+            if math.dist(target[:3], now["pose"][:3]) > 1e-6:
+                raise CommandRefused("a tilt must not move the TCP")
+            return
         for i, name in zip(range(3, 6), ("Rx", "Ry", "Rz")):
             if abs(angle_diff(target[i], now["pose"][i])) > ORIENT_TOL_DEG:
                 raise CommandRefused(f"{name} of the target differs from the current one by more than "
                                      f"{ORIENT_TOL_DEG} deg: the cup would rotate")
 
-    def move_to(self, target, cmd_id):
-        """One linear move, orientation held, then wait for it to finish."""
+    def move_to(self, target, cmd_id, turn=False):
+        """One linear move, orientation held (or, turn=True, the orientation turned in place), then wait for it."""
         self.arm.check_before_motion()                     # codebase plan §3.8 item 2
         now = self.read()
         problems = link.frame_problems(now["tool"], now["user"], self.m)
         if problems:
             raise link.Refused("frames differ from e03pro.yaml: " + "; ".join(problems))
-        self.check_target(target, now)
+        self.check_target(target, now, turn=turn)
         dist = math.dist(target[:3], now["pose"][:3])
+        if turn:
+            dist = max(abs(angle_diff(t, n)) for t, n in zip(target[3:], now["pose"][3:]))   # deg, for the timeout
         if dist < 1e-6:
             return now
-        v, a = self.s["jog_speed_mm_s"], self.s["jog_acc_mm_s2"]
+        v, a = (TILT_SPEED_DEG_S, TILT_ACC_DEG_S2) if turn else (self.s["jog_speed_mm_s"], self.s["jog_acc_mm_s2"])
         self.log.event(triallog.EV_PHASE, {"move": cmd_id, "from": now["pose"], "to": target, "v": v, "a": a})
         self.moving = True
         self.chan.emit("pose", moving=True, home=self.home, target=target, **now)
         self.arm.cmd("WayPoint", 0, *target, *now["joints"], self.m["tcp_name"], self.m["ucs_name"],
                      float(v), float(a), 0.0, 1, 0, 0, 0, 0, str(cmd_id))
-        self.arm.wait_done(timeout=dist / v + 2 * v / a + 10.0, pose=target)    # review S12
+        slow = TILT_TIME_FACTOR if turn else 1.0         # turns run slower than planned (measured, see TILT_TIME_FACTOR)
+        self.arm.wait_done(timeout=slow * dist / v + 2 * v / a + 10.0, pose=target)    # review S12
         self.moving = False
         return self.emit_pose()
 
@@ -301,6 +378,12 @@ class Session:
             target = list(now["pose"])
             target[axis] += d * step
             self.move_to(target, cid)
+        elif name in ("tilt", "roll"):
+            deg = _number(args.get("deg"), "deg")
+            if not 0 < abs(deg) <= TILT_MAX_DEG:
+                raise CommandRefused(f"{name} {deg} deg: allowed up to {TILT_MAX_DEG:g} deg, not 0")
+            now = self.read()
+            self.move_to((tilted if name == "tilt" else rolled)(now["pose"], deg), cid, turn=True)
         elif name == "goto":
             now = self.read()
             self.move_to(self.point_target(args.get("point"), now), cid)
@@ -385,6 +468,7 @@ def main(argv=None):
         s = settings(cli.workbench_block() if chan else None)
         check_settings(s)                          # before anything is enabled (review I4)
         motion.check_waypoint("linear", s["jog_speed_mm_s"], s["jog_acc_mm_s2"], confirmed)
+        motion.check_waypoint("linear", TILT_SPEED_DEG_S, TILT_ACC_DEG_S2, confirmed)   # same fields, deg for turns
         log.event(triallog.EV_INFO, {"jog_settings": s})
         m = arm_cfg["mounting"]
         stopped = None

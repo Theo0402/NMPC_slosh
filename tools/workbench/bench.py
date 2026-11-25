@@ -569,7 +569,7 @@ class Workbench:
             raise Refused("the arm is not ready yet: answer the questions first")
         if self.run.arm.get("busy"):
             raise Refused("a move is under way; wait for it, or press STOP")
-        if name not in ("jog", "goto", "path", "keep", "end"):
+        if name not in ("jog", "tilt", "roll", "goto", "path", "keep", "end"):
             raise Refused(f"unknown command {name}")
         cid = self.run.command(name, args)
         if cid is None:
