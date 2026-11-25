@@ -4,6 +4,7 @@ test works on temporary copies."""
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -41,8 +42,9 @@ def temp_configs(tmp_path, limits=True, period=0.1):
     end = arm.index("\n\n", start)
     arm = arm[:start] + (MOCK_LIMITS if limits else NO_LIMITS).rstrip("\n") + arm[end:]
     conf = (ROOT / "config/arm/confirmed.yaml").read_text(encoding="utf-8")
-    conf = conf.replace("servo_period_s: 0.2 ", f"servo_period_s: {period} ")
-    arm = arm.replace("period_s: 0.2 ", f"period_s: {max(period, 0.1)} ")
+    # the tests set the servo period themselves, whatever the owner has confirmed in the real file
+    conf = re.sub(r"(?m)^(servo_period_s:\s*)[0-9.eE+-]+", rf"\g<1>{period}", conf)
+    arm = re.sub(r"(?m)^(  period_s:\s*)[0-9.eE+-]+", rf"\g<1>{max(period, 0.1)}", arm)
     (tmp_path / "e03pro.yaml").write_text(arm, encoding="utf-8")
     (tmp_path / "confirmed.yaml").write_text(conf, encoding="utf-8")
     (tmp_path / "journal.md").write_text("# Journal\n\n- **W1 d1.** test\n", encoding="utf-8")

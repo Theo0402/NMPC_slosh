@@ -40,8 +40,9 @@ def configs(tmp_path, limits=True, period=0.1, ranges=None):
     # the tests set the joint ranges themselves (null unless given), whatever the real file holds
     arm = re.sub(r"(?m)^joint_ranges_deg:.*$", f"joint_ranges_deg: {ranges if ranges else 'null'}", arm)
     conf = (ROOT / "config/arm/confirmed.yaml").read_text(encoding="utf-8")
-    conf = conf.replace("servo_period_s: 0.2 ", f"servo_period_s: {period} ")
-    arm = arm.replace("period_s: 0.2 ", f"period_s: {max(period, 0.1)} ")
+    # the tests set the servo period themselves, whatever the owner has confirmed in the real file
+    conf = re.sub(r"(?m)^(servo_period_s:\s*)[0-9.eE+-]+", rf"\g<1>{period}", conf)
+    arm = re.sub(r"(?m)^(  period_s:\s*)[0-9.eE+-]+", rf"\g<1>{max(period, 0.1)}", arm)
     (tmp_path / "e03pro.yaml").write_text(arm, encoding="utf-8")
     (tmp_path / "confirmed.yaml").write_text(conf, encoding="utf-8")
     return ["--confirmed", str(tmp_path / "confirmed.yaml"), "--arm-config", str(tmp_path / "e03pro.yaml"),
@@ -75,7 +76,8 @@ def last_event(trial):
 
 def test_config_files_load():
     confirmed, arm, texts = config.load()
-    assert confirmed["servo_period_s"] == 0.2 and confirmed["joint_acc_deg_s2"] == 100.0
+    assert confirmed["servo_period_s"] in (0.2, 0.1, 0.05, 0.04, 0.03, 0.02, 0.015, 0.01)   # a ladder step
+    assert confirmed["joint_acc_deg_s2"] == 100.0
     assert arm["mounting"]["payload_kg"] == 0.0
     assert config.limits_known(arm)                    # recorded from the arm by stage 1.1 (2026-11-24)
 
@@ -322,6 +324,7 @@ def test_owner_ladder_profile_is_within_the_starting_values():
     p = motion.LadderProfile()
     samples = motion.sample(p, sim.MOCK_HOME_DEG, confirmed["servo_period_s"])
     rep = motion.check_stream(samples, confirmed["servo_period_s"], confirmed, p)
-    assert len(samples) == 121 and samples[0] == samples[-1] == sim.MOCK_HOME_DEG
+    assert len(samples) == round(p.total_s / confirmed["servo_period_s"]) + 1     # 121 at 0.2 s, 241 at 0.1 s
+    assert samples[0] == samples[-1] == sim.MOCK_HOME_DEG
     # the tapers add w'(t) sin terms: 4.11 deg/s and 7.74 deg/s^2, vs 3.14 and 1.97 for the plain sine
     assert abs(rep["peak_speed_deg_s"] - 4.114) < 0.01 and abs(rep["peak_acc_deg_s2"] - 7.740) < 0.01
