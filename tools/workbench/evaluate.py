@@ -47,7 +47,9 @@ def tool_metrics(tool, trial_path, exit_code, arm_config):
     m["refusal_count"] = len(m["refusals"])
     phases = _texts(trial, triallog.EV_PHASE)
     m["grpdisable_ok"] = ("GrpDisable sent on exit" in phases and
-                          not any(t.startswith("GrpDisable FAILED") for t in m["errors"]))
+                          not any(t.startswith("GrpDisable FAILED") for t in m["errors"]))    # a motion stage passes only if the arm was disabled at the end and no reply was a Fail: on 2026-11-25 the
+    # 1.3 arm run (20261125-155533-move_test-arm) ended with GrpDisable Fail 20018 and still read "criteria met"
+    clean_exit = m["grpdisable_ok"] and m["fail_replies"] == 0
     summaries = [e for e in _events(trial, triallog.EV_SUMMARY) if isinstance(e, dict)]
     summary = summaries[-1] if summaries else None
     name = tool.rsplit(".", 1)[-1]
@@ -77,12 +79,12 @@ def tool_metrics(tool, trial_path, exit_code, arm_config):
         m.update({k: s.get(k) for k in ("packets", "gap_mean_ms", "gap_max_ms", "safety_keys", "byte_orders")})
         m["stream_ok"] = bool(s.get("packets")) and not s.get("error") and exit_code == 0
     elif name == "move_test":
-        m["completed"] = exit_code == 0 and summary is not None
+        m["completed"] = exit_code == 0 and summary is not None and clean_exit
         m["format_accepted"] = bool(summary and summary.get("format_test"))
     elif name == "servo_ladder":
         s = summary or {}
         m["verdict"] = s.get("verdict")
-        m["verdict_ok"] = exit_code == 0 and str(s.get("verdict", "")).startswith("OK")
+        m["verdict_ok"] = exit_code == 0 and str(s.get("verdict", "")).startswith("OK") and clean_exit
         m["late_fraction"] = s.get("late_fraction")
         m["median_reply_ms"] = (s.get("reply_ms") or {}).get("median")
         m["period_s"] = s.get("period_s")
@@ -91,7 +93,7 @@ def tool_metrics(tool, trial_path, exit_code, arm_config):
     elif name == "pose_recorder":
         poses = (summary or {}).get("poses") or []
         m["poses_recorded"] = len(poses)
-        m["all_poses"] = exit_code == 0 and len(poses) > 0
+        m["all_poses"] = exit_code == 0 and len(poses) > 0 and clean_exit
     return m
 
 

@@ -2,6 +2,7 @@
 replies are flagged; requests above confirmed.yaml are refused (codebase plan §9, week 1)."""
 import _thread
 import pathlib
+import re
 import threading
 import time
 
@@ -36,8 +37,8 @@ def configs(tmp_path, limits=True, period=0.1, ranges=None):
     start = arm.index("limits_readback:")
     end = arm.index("\n\n", start)
     arm = arm[:start] + (MOCK_LIMITS if limits else NO_LIMITS).rstrip("\n") + arm[end:]
-    if ranges:
-        arm = arm.replace("joint_ranges_deg: null", f"joint_ranges_deg: {ranges}")
+    # the tests set the joint ranges themselves (null unless given), whatever the real file holds
+    arm = re.sub(r"(?m)^joint_ranges_deg:.*$", f"joint_ranges_deg: {ranges if ranges else 'null'}", arm)
     conf = (ROOT / "config/arm/confirmed.yaml").read_text(encoding="utf-8")
     conf = conf.replace("servo_period_s: 0.2 ", f"servo_period_s: {period} ")
     arm = arm.replace("period_s: 0.2 ", f"period_s: {max(period, 0.1)} ")
@@ -112,6 +113,24 @@ def test_move_test_mock(tmp_path, mock):
     assert mock.arm.stats["forbidden"] == 0 and mock.arm.stats["dropped_extra_messages"] == 0
     assert abs(mock.arm.q[5] - (sim.MOCK_HOME_DEG[5] + 10.0)) < 1e-6
     assert abs(mock.arm.pose[2] - (sim.MOCK_HOME_POSE[2] + 20.0)) < 1e-6
+
+
+def _move_test_metrics(tmp_path, mock_factory, name, fail_rules):
+    from tools.workbench.evaluate import tool_metrics
+    srv = mock_factory(fail_rules=fail_rules)
+    (tmp_path / name).mkdir()
+    code = move_test.main(mock_args(srv) + configs(tmp_path / name))
+    trial = sorted((tmp_path / name / "data" / "trials").glob("*.bin"))[0]
+    return tool_metrics("tools.elfin_py.move_test", trial, code, None), names(read_trial(trial))
+
+
+def test_failed_grpdisable_fails_the_motion_stage(tmp_path, mock_factory):
+    """The 1.3 arm runs of 2026-11-25 ended with 'GrpDisable,Fail,20018' and first read "criteria met"."""
+    m, n = _move_test_metrics(tmp_path, mock_factory, "clean", [])
+    assert m["completed"] is True and m["grpdisable_ok"] is True and n[-1] == "GrpDisable"
+    m, n = _move_test_metrics(tmp_path, mock_factory, "refused", [("GrpDisable", 1, 20018)])
+    assert n.count("GrpDisable") == 1                    # one try; the operator disables from the pendant
+    assert m["fail_replies"] == 1 and m["grpdisable_ok"] is False and m["completed"] is False
 
 
 def test_move_test_dry_run_with_return(tmp_path):

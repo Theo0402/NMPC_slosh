@@ -43,7 +43,9 @@ limits_readback:
 
 # Joint ranges as the pendant shows them (LINUX p.50). The protocol has no read command
 # [MISSING]; sources disagree [UNCLEAR] (elfin_overview.md). Entered by the operator.
-joint_ranges_deg: null           # [[min, max] x 6]
+# Read from the pendant 2026-11-25 (安全限制 → 关节限制 → 关节范围; normal and reduced mode equal):
+# J3 ±150 and J5 ±147 differ from LINUX p.50 (±153, ±360); they match the elfin5 URDF.
+joint_ranges_deg: [[-360, 360], [-135, 135], [-150, 150], [-360, 360], [-147, 147], [-360, 360]]   # [[min, max] x 6]
 
 servo_in_use:
   period_s: 0.2        # must not be shorter than confirmed.yaml servo_period_s
